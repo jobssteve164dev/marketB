@@ -40,6 +40,12 @@ export const DEFAULT_MEMO_TEMPLATES = [
     title: '邀请加入社群',
     content: '非常感谢关注！我们正在使用 SoloMap 辅助开发这款插件。如果您对独立开发、营销自动化有兴趣，欢迎加入我们的开发者社群进行交流！',
     category: '用户邀约'
+  },
+  {
+    id: 'template-4',
+    title: '介绍 SoloMap 插件',
+    content: '我们做的 SoloMap 插件是给独立开发者和小团队用的增长助手：在浏览器侧边栏里发现相关视频和讨论，快速整理评论话术，并用已登录账号完成回复流程。它更适合想持续做内容分发、产品冷启动和用户沟通的人。',
+    category: '产品介绍'
   }
 ];
 

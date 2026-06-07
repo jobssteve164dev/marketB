@@ -4,7 +4,7 @@ import type { Message } from '../shared/types.js';
 console.log('[Marketing Sidebar] Content script active on:', window.location.hostname);
 
 // 监听来自插件后台(Background)或侧边栏(Sidebar)的指令消息
-chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   const adapter = getAdapterForCurrentPage();
   if (!adapter) {
     sendResponse({ success: false, error: 'No adapter matched for this website.' });

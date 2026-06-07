@@ -201,13 +201,14 @@ observer.observe(document.body, {
 
 ## 6. 评论注入机制
 
-**关键问题**: 如何在不自动点击"发布"的前提下，填充评论框？
+**关键问题**: 如何在后台自动打开目标视频，并按用户设置完成评论填充或发送？
 
 **方案**:
-1. Content Script 找到目标帖子的评论框 (selector by postId)
-2. 使用 `element.focus()` + `element.value = content` 填充
-3. 触发 `input` 和 `change` 事件（模拟用户输入）
-4. **不触发 submit**，由用户手动 Enter 或点击发布按钮
+1. Background Service Worker 在后台打开目标视频页
+2. Content Script 找到目标帖子的评论框 (selector by postId)
+3. 使用 `element.focus()` + `element.value = content` 填充
+4. 触发 `input` 和 `change` 事件（模拟用户输入）
+5. 若用户开启自动发布，点击发布按钮；否则保留已填充内容等待用户确认
 
 **代码示例**:
 ```typescript

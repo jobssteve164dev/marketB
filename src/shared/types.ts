@@ -55,6 +55,7 @@ export type MessageType =
   | "SEARCH_POSTS"
   | "POSTS_PARSED"
   | "INJECT_COMMENT"
+  | "RUN_COMMENT_TASKS"
   | "INJECT_COMMENT_RESULT"
   | "GET_KEYWORDS"
   | "SAVE_KEYWORD"

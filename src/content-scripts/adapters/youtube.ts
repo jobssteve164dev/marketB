@@ -69,7 +69,7 @@ export class YoutubeAdapter extends BaseAdapter {
     return posts.sort((a, b) => b.heatScore - a.heatScore);
   }
 
-  async injectComment(postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean> {
+  async injectComment(_postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean> {
     try {
       let placeholderArea: HTMLElement | null = null;
       let inputArea: HTMLElement | null = null;

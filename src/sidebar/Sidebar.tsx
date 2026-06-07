@@ -30,7 +30,6 @@ export default function Sidebar() {
   // 当前浏览器活动 Tab 的环境状态
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
   const [currentPlatform, setCurrentPlatform] = useState<Platform | null>(null);
-  const [currentUrl, setCurrentUrl] = useState('');
   
   // 简易通知 Toast 状态
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -59,7 +58,24 @@ export default function Sidebar() {
         }
 
         if (result.memos) {
-          setMemos(result.memos);
+          const existingMemos = result.memos as Memo[];
+          const missingDefaultMemos = DEFAULT_MEMO_TEMPLATES
+            .filter((template) => !existingMemos.some((memo) => memo.id === template.id))
+            .map((template) => ({
+              id: template.id,
+              title: template.title,
+              content: template.content,
+              category: template.category,
+              tags: [],
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              isPinned: false,
+            }));
+          const mergedMemos = [...existingMemos, ...missingDefaultMemos];
+          setMemos(mergedMemos);
+          if (missingDefaultMemos.length > 0) {
+            chrome.storage.local.set({ memos: mergedMemos });
+          }
         } else {
           // 初始化默认模板
           const defaultMemos: Memo[] = DEFAULT_MEMO_TEMPLATES.map((t) => ({
@@ -118,7 +134,6 @@ export default function Sidebar() {
       if (tabs && tabs[0]) {
         const tab = tabs[0];
         setCurrentTabId(tab.id || null);
-        setCurrentUrl(tab.url || '');
         
         // 解析匹配的平台
         const urlStr = tab.url || '';
@@ -139,7 +154,7 @@ export default function Sidebar() {
     // 监听 Tab 切换和更新事件
     if (typeof chrome !== 'undefined' && chrome.tabs) {
       const handleActivated = () => detectActiveTab();
-      const handleUpdated = (tabId: number, changeInfo: any) => {
+      const handleUpdated = (_tabId: number, changeInfo: any) => {
         if (changeInfo.status === 'complete') {
           detectActiveTab();
         }
@@ -246,47 +261,62 @@ export default function Sidebar() {
     });
   };
 
-  // 5. 自动填充评论到页面 (单视频填充)
-  const handleInjectComment = () => {
-    if (!selectedPost) {
-      showToast('请先在“视频发现”列表中选中目标视频', 'error');
+  const runBackgroundCommentTasks = (targetPosts: Post[]) => {
+    if (targetPosts.length === 0) {
+      showToast('请先勾选需要回复的视频', 'error');
       return;
     }
     if (!replyText.trim()) {
       showToast('请编写回复评论的内容', 'error');
       return;
     }
-    if (!currentTabId) {
-      showToast('当前无可用活动标签页', 'error');
+    if (typeof chrome === 'undefined' || !chrome.runtime) {
+      showToast('当前环境不支持后台自动任务', 'error');
       return;
     }
 
     setIsInjecting(true);
-    showToast('正在填充评论区，请稍候...', 'info');
+    showToast(`后台正在处理 ${targetPosts.length} 个视频...`, 'info');
 
-    chrome.tabs.sendMessage(currentTabId, { 
-      type: 'INJECT_COMMENT',
-      postId: selectedPost.id,
-      commentText: replyText,
-      autoSubmit: autoSubmit
+    chrome.runtime.sendMessage({
+      type: 'RUN_COMMENT_TASKS',
+      tasks: targetPosts.map(post => ({
+        id: post.id,
+        pageUrl: post.pageUrl,
+        commentText: replyText,
+        autoSubmit
+      }))
     }, (response) => {
       setIsInjecting(false);
       if (chrome.runtime.lastError) {
-        showToast('填充失败。请确保您当前处于该视频播放页，并且网页评论区已加载。', 'error');
+        showToast('后台任务启动失败，请刷新插件后重试', 'error');
         return;
       }
 
-      if (response && response.success) {
+      if (response?.success) {
         showToast(
           autoSubmit 
-            ? '评论已自动填充并提交发布！页面稍后将自动关闭。' 
-            : '评论填充成功！请在目标页面手动点击发布。', 
+            ? `已完成 ${targetPosts.length} 个视频的后台填充和发送。` 
+            : `已完成 ${targetPosts.length} 个视频的后台填充，请在打开的页面确认发送。`, 
           'success'
         );
       } else {
-        showToast('评论框定位失败！请确保评论区已加载（可尝试手动滑动滚动条）。', 'error');
+        const results = response?.results || [];
+        const failedCount = results.filter((result: { success: boolean }) => !result.success).length || targetPosts.length;
+        showToast(`${failedCount} 个视频未完成，请检查登录状态或评论区是否可用`, 'error');
       }
     });
+  };
+
+  // 5. 自动填充评论到页面 (单视频后台任务)
+  const handleInjectComment = () => {
+    const targetPost = selectedPost || posts.find(p => selectedPostIds.includes(p.id));
+    if (!targetPost) {
+      showToast('请先在“视频发现”列表中选中目标视频', 'error');
+      return;
+    }
+
+    runBackgroundCommentTasks([targetPost]);
   };
 
   // 6. 批量在后台新标签页打开视频并填充评论
@@ -295,63 +325,8 @@ export default function Sidebar() {
       showToast('请先勾选需要填充的视频', 'error');
       return;
     }
-    if (!replyText.trim()) {
-      showToast('请编写回复评论的内容', 'error');
-      return;
-    }
-    if (typeof chrome === 'undefined' || !chrome.tabs) {
-      showToast('当前环境不支持批量操作', 'error');
-      return;
-    }
-
-    setIsInjecting(true);
-    showToast(`正在启动批量任务，将处理 ${selectedPostIds.length} 个视频...`, 'info');
-
     const selectedPostsData = posts.filter(p => selectedPostIds.includes(p.id));
-
-    selectedPostsData.forEach((post, index) => {
-      // 间隔 2 秒依次在后台打开，防浏览器卡顿与过度操作
-      setTimeout(() => {
-        chrome.tabs.create({ url: post.pageUrl, active: false }, (tab) => {
-          if (!tab || !tab.id) return;
-          const tabId = tab.id;
-
-          // 注册加载监听器，页面 Load 完毕后填充
-          const loadListener = (updatedTabId: number, changeInfo: any) => {
-            if (updatedTabId === tabId && changeInfo.status === 'complete') {
-              // 延迟 1.5 秒确保 Content Script 初始化和组件渲染
-              setTimeout(() => {
-                chrome.tabs.sendMessage(tabId, {
-                  type: 'INJECT_COMMENT',
-                  postId: post.id,
-                  commentText: replyText,
-                  autoSubmit: autoSubmit
-                }, (response) => {
-                  if (chrome.runtime.lastError) {
-                    console.warn(`Tab ${tabId} inject error:`, chrome.runtime.lastError);
-                  }
-                  // 移除本 tab 的监听器
-                  chrome.tabs.onUpdated.removeListener(loadListener);
-                });
-              }, 1500);
-            }
-          };
-
-          chrome.tabs.onUpdated.addListener(loadListener);
-        });
-
-        // 最后一个任务分发完毕后复位 loading
-        if (index === selectedPostsData.length - 1) {
-          setIsInjecting(false);
-          showToast(
-            autoSubmit 
-              ? `已成功在后台打开 ${selectedPostsData.length} 个视频并完成自动发布！` 
-              : `已成功在后台打开 ${selectedPostsData.length} 个视频并自动填充回复！请切换过去手动发送即可。`, 
-            'success'
-          );
-        }
-      }, index * 2000);
-    });
+    runBackgroundCommentTasks(selectedPostsData);
   };
 
   // 7. 备忘录模板管理
@@ -639,9 +614,9 @@ export default function Sidebar() {
                       
                       <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
                         <div className="flex items-center gap-3">
-                          <span>👁️ {formatCompactNum(post.engagement.likes)}</span>
+                          <span>播放 {formatCompactNum(post.engagement.likes)}</span>
                           {post.platform === 'bilibili' && (
-                            <span>💬 {formatCompactNum(post.engagement.comments)} (弹幕)</span>
+                            <span>弹幕 {formatCompactNum(post.engagement.comments)}</span>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
@@ -739,11 +714,7 @@ export default function Sidebar() {
                 disabled={isInjecting || !replyText.trim()}
                 className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 shrink-0"
               >
-                {isInjecting ? (
-                  <>正在逐个执行后台填充...</>
-                ) : (
-                  <>⚡ 一键批量在后台打开并填充评论 ({selectedPostIds.length}个视频)</>
-                )}
+                {isInjecting ? '后台正在自动处理...' : `一键后台填充并发送 (${selectedPostIds.length}个视频)`}
               </button>
             ) : (
               <button
@@ -751,7 +722,7 @@ export default function Sidebar() {
                 disabled={isInjecting || !selectedPost || !replyText.trim()}
                 className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 shrink-0"
               >
-                {isInjecting ? '正在填充...' : '⚡ 一键填充到当前视频页面'}
+                {isInjecting ? '后台正在自动处理...' : '一键后台填充并发送'}
               </button>
             )}
           </div>
@@ -886,7 +857,7 @@ export default function Sidebar() {
             {/* 项目申明 */}
             <div className="p-3 bg-indigo-950/10 border border-indigo-500/10 rounded-xl text-[10px] text-slate-500 leading-relaxed shrink-0">
               <p className="font-semibold text-slate-400 mb-1">🔒 安全性与合规声明：</p>
-              <p>本插件所有数据（包括检索词、回复文本及分析缓存）均安全保存在您的本地浏览器中，绝不上报或泄露。本插件不代理任何自动评论发布，所有填充后提交动作完全由用户手动触发，遵守相关网站之 ToS。</p>
+              <p>本插件所有数据（包括检索词、回复文本及分析缓存）均安全保存在您的本地浏览器中，绝不上报或泄露。勾选自动发布后，插件会在后台打开目标视频、填充评论并发送；关闭自动发布时，只填充内容并等待您手动确认。</p>
             </div>
           </div>
         )}
