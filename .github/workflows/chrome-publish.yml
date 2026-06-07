@@ -2,51 +2,92 @@ name: Build and Publish Extension
 
 on:
   push:
-    tags:
-      - 'v*' # 触发条件：当您推送形如 v1.0.0 的 tag 时自动触发
-  workflow_dispatch: # 支持在 GitHub 页面上点击手动运行工作流，方便调试和日常发布
+    branches:
+      - main
+      - master
+    # 限制条件：只有源码文件夹和关键配置文件被改动时才触发工作流，修改文档(docs)将保持静默
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'vite.config.ts'
+      - 'tailwind.config.js'
+      - 'postcss.config.js'
+      - 'tsconfig.json'
+      - 'tsconfig.node.json'
+      - 'sidebar.html'
+  workflow_dispatch: # 支持手动运行工作流，方便测试
+
+# 授予写入权限以允许工作流推送 Git Tag 和发布 Release 制品
+permissions:
+  contents: write
 
 jobs:
   build-and-publish:
-    name: Build & Publish to Chrome Web Store
+    name: Build, Tag & Publish to Chrome Web Store
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 拉取代码
+      # 1. 拉取代码 (fetch-depth: 0 完整拉取历史，用以生成准确的 Release 提交变动历史)
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # 2. 设置 Node.js 环境并缓存 npm 依赖
+      # 2. 设置 Node.js 环境并缓存依赖
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
           cache: 'npm'
 
-      # 3. 安装依赖 (使用 npm install 以兼容未锁定版本库的情况)
+      # 3. 读取 package.json 中的版本号
+      - name: Extract Project Version
+        id: get_version
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # 4. 安装依赖
       - name: Install Dependencies
         run: npm install
 
-      # 4. 构建项目
+      # 5. 构建项目
       - name: Build Extension
         run: npm run build
 
-      # 5. 将 dist 目录打包为 zip (确保 manifest.json 在 zip 的第一级根目录中)
+      # 6. 将编译产物 dist 压缩为 zip
       - name: Package Extension
         run: |
           cd dist
           zip -r ../extension.zip ./*
           cd ..
 
-      # 6. 将打包后的 ZIP 压缩包上传归档，方便在 GitHub Actions 页面直接下载和本地验证调试
-      - name: Archive Production Zip Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: chrome-extension-zip
-          path: extension.zip
-          retention-days: 7 # 临时文件在 GitHub 仅保留 7 天以节约存储空间
+      # 7. 自动打 Git Tag 并推送 (如果该版本的 Tag 在仓库中还不存在)
+      - name: Create Git Tag
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists. Skipping git tagging."
+          else
+            git tag "$VERSION"
+            git push origin "$VERSION"
+          fi
 
-      # 7. 上传并发布至 Chrome 商店
+      # 8. 自动创建 GitHub Release，挂载 zip 包，并根据提交记录自动生成 Changelog 变动说明
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          generate_release_notes: true
+          files: extension.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 9. 上传并发布至 Chrome Web Store
       - name: Upload & Publish to Chrome Web Store
         uses: fregante/chrome-extension-upload@v2
         with:
@@ -55,4 +96,4 @@ jobs:
           refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
           extension-id: ${{ secrets.CHROME_APP_ID }}
           file-path: ./extension.zip
-          publish: true # 设为 true 表示自动提交审核；若只上传更新草稿不自动提审，可修改为 false
+          publish: true
