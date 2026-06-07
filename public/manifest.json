@@ -29,6 +29,7 @@
   "permissions": [
     "storage",
     "scripting",
+    "tabs",
     "sidePanel"
   ],
   "host_permissions": [

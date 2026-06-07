@@ -11,6 +11,7 @@ interface CommentTaskResult {
   id: string;
   success: boolean;
   error?: string;
+  reusedTab?: boolean;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -24,6 +25,34 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const autoCloseTabIds = new Set<number>();
+
+const normalizeTargetUrl = (url?: string) => {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('bilibili.com')) {
+      const bvid = parsed.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/)?.[1];
+      return bvid ? `bilibili:${bvid}` : `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+    }
+    if (parsed.hostname.includes('youtube.com')) {
+      const videoId = parsed.searchParams.get('v');
+      return videoId ? `youtube:${videoId}` : `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+    }
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+  } catch {
+    return url.split('#')[0].split('?')[0].replace(/\/$/, '');
+  }
+};
+
+const findExistingTargetTab = async (pageUrl: string) => {
+  const targetKey = normalizeTargetUrl(pageUrl);
+  if (!targetKey) return null;
+
+  const tabs = await chrome.tabs.query({});
+  return tabs.find(tab => normalizeTargetUrl(tab.url) === targetKey) || null;
+};
 
 const waitForTabComplete = (tabId: number, timeoutMs = 20000) => {
   return new Promise<void>((resolve, reject) => {
@@ -49,16 +78,22 @@ const waitForTabComplete = (tabId: number, timeoutMs = 20000) => {
 
 const runCommentTask = async (task: CommentTask): Promise<CommentTaskResult> => {
   let tabId: number | undefined;
+  let createdByTask = false;
 
   try {
-    const tab = await chrome.tabs.create({ url: task.pageUrl, active: false });
+    const existingTab = await findExistingTargetTab(task.pageUrl);
+    const tab = existingTab || await chrome.tabs.create({ url: task.pageUrl, active: false });
     tabId = tab.id;
-    if (!tabId) throw new Error('后台标签页创建失败');
+    createdByTask = !existingTab;
+    if (!tabId) throw new Error(createdByTask ? '后台标签页创建失败' : '已打开标签页不可用');
+    if (createdByTask) autoCloseTabIds.add(tabId);
 
-    await waitForTabComplete(tabId).catch(async () => {
-      const currentTab = await chrome.tabs.get(tabId!);
-      if (currentTab.status !== 'complete') throw new Error('目标视频页面加载超时');
-    });
+    if (tab.status !== 'complete') {
+      await waitForTabComplete(tabId).catch(async () => {
+        const currentTab = await chrome.tabs.get(tabId!);
+        if (currentTab.status !== 'complete') throw new Error('目标视频页面加载超时');
+      });
+    }
 
     await wait(1800);
 
@@ -73,7 +108,7 @@ const runCommentTask = async (task: CommentTask): Promise<CommentTaskResult> => 
       throw new Error(response?.error || '评论填充或发送失败');
     }
 
-    return { id: task.id, success: true };
+    return { id: task.id, success: true, reusedTab: !createdByTask };
   } catch (err: any) {
     return { id: task.id, success: false, error: err?.message || '后台评论任务失败' };
   }
@@ -97,8 +132,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true, status: 'alive' });
   } else if (message.type === 'CLOSE_TAB') {
     if (sender.tab && sender.tab.id) {
-      // 自动关闭触发了发送成功的页面
-      chrome.tabs.remove(sender.tab.id);
+      const senderTabId = sender.tab.id;
+      if (autoCloseTabIds.has(senderTabId)) {
+        autoCloseTabIds.delete(senderTabId);
+        chrome.tabs.remove(senderTabId);
+      }
       sendResponse({ success: true });
     } else {
       sendResponse({ success: false, error: 'No tab ID found in sender' });

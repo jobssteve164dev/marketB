@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import type { Post, Keyword, Memo, Platform } from '../shared/types.js';
 import { PLATFORM_CONFIG, DEFAULT_MEMO_TEMPLATES } from '../shared/constants.js';
 
+type PostActivity = {
+  viewedAt?: number;
+  openedAt?: number;
+  handledAt?: number;
+};
+
+type PostActivityMap = Record<string, PostActivity>;
+
 export default function Sidebar() {
   // 视图 Tab 切换
   const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'settings'>('search');
@@ -20,6 +28,7 @@ export default function Sidebar() {
   const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]); // 多选视频的 ID 列表
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
+  const [postActivity, setPostActivity] = useState<PostActivityMap>({});
   
   // 评论回复编辑
   const [replyText, setReplyText] = useState('');
@@ -43,7 +52,11 @@ export default function Sidebar() {
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       // 获取已存的关键词和备忘录模板
-      chrome.storage.local.get(['keywords', 'memos'], (result) => {
+      chrome.storage.local.get(['keywords', 'memos', 'postActivity'], (result) => {
+        if (result.postActivity) {
+          setPostActivity(result.postActivity as PostActivityMap);
+        }
+
         if (result.keywords) {
           setKeywords(result.keywords);
         } else {
@@ -276,6 +289,7 @@ export default function Sidebar() {
     }
 
     setIsInjecting(true);
+    targetPosts.forEach(post => markPostActivity(post, 'openedAt'));
     showToast(`后台正在处理 ${targetPosts.length} 个视频...`, 'info');
 
     chrome.runtime.sendMessage({
@@ -294,6 +308,7 @@ export default function Sidebar() {
       }
 
       if (response?.success) {
+        targetPosts.forEach(post => markPostActivity(post, 'handledAt'));
         showToast(
           autoSubmit 
             ? `已完成 ${targetPosts.length} 个视频的后台填充和发送。` 
@@ -302,6 +317,14 @@ export default function Sidebar() {
         );
       } else {
         const results = response?.results || [];
+        const completedIds = new Set(
+          results
+            .filter((result: { id: string; success: boolean }) => result.success)
+            .map((result: { id: string }) => result.id)
+        );
+        targetPosts
+          .filter(post => completedIds.has(post.id))
+          .forEach(post => markPostActivity(post, 'handledAt'));
         const failedCount = results.filter((result: { success: boolean }) => !result.success).length || targetPosts.length;
         const firstError = results.find((result: { success: boolean; error?: string }) => !result.success)?.error;
         showToast(firstError || `${failedCount} 个视频未完成，评论区或发送按钮不可用`, 'error');
@@ -375,6 +398,73 @@ export default function Sidebar() {
   };
 
   // 辅助转换大数值
+  const getUrlActivityKey = (platform: Platform, pageUrl?: string, fallbackId = '') => {
+    try {
+      const parsed = new URL(pageUrl || '');
+      if (parsed.hostname.includes('bilibili.com')) {
+        const bvid = parsed.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/)?.[1];
+        return bvid ? `bilibili:${bvid}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      }
+      if (parsed.hostname.includes('youtube.com')) {
+        const videoId = parsed.searchParams.get('v');
+        return videoId ? `youtube:${videoId}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      }
+    } catch {
+      // 退回到视频 id，避免无效 URL 导致状态丢失。
+    }
+    return `${platform}:${fallbackId || pageUrl || ''}`;
+  };
+
+  const getPostActivityKey = (post: Post) => {
+    return getUrlActivityKey(post.platform, post.pageUrl, post.id);
+  };
+
+  const markPostActivity = (post: Post, field: keyof PostActivity) => {
+    const key = getPostActivityKey(post);
+    setPostActivity((current) => {
+      const nextActivity = {
+        ...current,
+        [key]: {
+          ...current[key],
+          [field]: Date.now(),
+        },
+      };
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({ postActivity: nextActivity });
+      }
+      return nextActivity;
+    });
+  };
+
+  const getPostActivityLabel = (post: Post) => {
+    const activity = postActivity[getPostActivityKey(post)];
+    if (activity?.handledAt) return '已操作';
+    if (activity?.openedAt) return '已打开';
+    if (activity?.viewedAt) return '已点过';
+    return '';
+  };
+
+  const openPostPage = (post: Post) => {
+    markPostActivity(post, 'openedAt');
+
+    if (typeof chrome !== 'undefined' && chrome.tabs) {
+      const targetKey = getPostActivityKey(post);
+      chrome.tabs.query({}, (tabs) => {
+        const existingTab = tabs.find((tab) => getUrlActivityKey(post.platform, tab.url || '') === targetKey);
+        if (existingTab?.id) {
+          chrome.tabs.update(existingTab.id, { active: true });
+          if (existingTab.windowId) {
+            chrome.windows?.update(existingTab.windowId, { focused: true });
+          }
+        } else {
+          chrome.tabs.create({ url: post.pageUrl });
+        }
+      });
+    } else {
+      window.open(post.pageUrl, '_blank');
+    }
+  };
+
   const formatCompactNum = (num: number) => {
     if (num >= 10000) {
       return (num / 10000).toFixed(1) + '万';
@@ -391,6 +481,7 @@ export default function Sidebar() {
   // 单选/多选卡片交互
   const handleSelectCard = (post: Post) => {
     setSelectedPost(post);
+    markPostActivity(post, 'viewedAt');
     // 单击卡片时，也自动将该视频设为多选里的唯一选中（或添加）
     if (!selectedPostIds.includes(post.id)) {
       setSelectedPostIds([post.id]);
@@ -586,6 +677,8 @@ export default function Sidebar() {
                       className={`p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col gap-1.5 ${
                         selectedPost?.id === post.id || selectedPostIds.includes(post.id)
                           ? 'bg-indigo-950/30 border-indigo-500/50 shadow-md shadow-indigo-500/5'
+                          : getPostActivityLabel(post)
+                          ? 'bg-amber-950/20 border-amber-500/30 hover:border-amber-400/50 hover:bg-amber-950/30'
                           : 'bg-slate-900/40 border-slate-800/80 hover:border-slate-700/60 hover:bg-slate-900/60'
                       }`}
                     >
@@ -604,6 +697,11 @@ export default function Sidebar() {
                           }`}>
                             {post.platform === 'bilibili' ? 'B站' : 'YT'}
                           </span>
+                          {getPostActivityLabel(post) && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-500/15 text-amber-300 border border-amber-400/20">
+                              {getPostActivityLabel(post)}
+                            </span>
+                          )}
                         </div>
                         <span className="text-slate-400 text-xs font-medium truncate max-w-[140px]">
                           👤 {post.author}
@@ -625,11 +723,7 @@ export default function Sidebar() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (typeof chrome !== 'undefined' && chrome.tabs) {
-                                chrome.tabs.create({ url: post.pageUrl });
-                              } else {
-                                window.open(post.pageUrl, '_blank');
-                              }
+                              openPostPage(post);
                             }}
                             className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
                             title="在新窗口中打开此视频"
