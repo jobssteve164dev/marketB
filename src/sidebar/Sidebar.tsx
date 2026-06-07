@@ -17,6 +17,7 @@ export default function Sidebar() {
   // 爬取到的视频帖子数据
   const [posts, setPosts] = useState<Post[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]); // 多选视频的 ID 列表
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   
@@ -169,12 +170,10 @@ export default function Sidebar() {
     }
 
     // 获取搜索目标链接
-    // 默认使用当前平台的 search pattern。若当前非匹配平台，默认使用 Bilibili 搜索
     const targetPlatform = currentPlatform || 'bilibili';
     const searchUrl = PLATFORM_CONFIG[targetPlatform].searchUrlPattern(keywordText);
 
     if (typeof chrome !== 'undefined' && chrome.tabs && currentTabId) {
-      // 在当前标签页直接跳转
       chrome.tabs.update(currentTabId, { url: searchUrl }, () => {
         showToast(`正在当前页面搜索: "${keywordText}"`, 'info');
       });
@@ -236,6 +235,8 @@ export default function Sidebar() {
 
       if (response && response.success && response.posts) {
         setPosts(response.posts);
+        setSelectedPostIds([]); // 重置选中的复选框
+        setSelectedPost(null);
         showToast(`成功提取到 ${response.posts.length} 个视频！`, 'success');
       } else {
         showToast(response?.error || '页面中未发现支持格式的视频卡片', 'error');
@@ -243,7 +244,7 @@ export default function Sidebar() {
     });
   };
 
-  // 5. 自动填充评论到页面
+  // 5. 自动填充评论到页面 (单视频填充)
   const handleInjectComment = () => {
     if (!selectedPost) {
       showToast('请先在“视频发现”列表中选中目标视频', 'error');
@@ -261,10 +262,6 @@ export default function Sidebar() {
     setIsInjecting(true);
     showToast('正在填充评论区，请稍候...', 'info');
 
-    // 如果当前打开的页面不是目标视频页面，先提示用户需要先点击进入视频详情页
-    const isDetailUrl = currentUrl.includes(selectedPost.id) || currentUrl.includes(selectedPost.pageUrl);
-    
-    // 我们强制向当前 Tab 尝试注入评论，提示用户可以点页面卡片跳转
     chrome.tabs.sendMessage(currentTabId, { 
       type: 'INJECT_COMMENT',
       postId: selectedPost.id,
@@ -272,19 +269,78 @@ export default function Sidebar() {
     }, (response) => {
       setIsInjecting(false);
       if (chrome.runtime.lastError) {
-        showToast('填充失败。请确保您当前正处于该视频播放页，且已下滑显示了评论框。', 'error');
+        showToast('填充失败。请确保您当前处于该视频播放页，且已滑动显示评论区。', 'error');
         return;
       }
 
       if (response && response.success) {
-        showToast('评论填充成功！请在目标页面手动点击发布按钮。', 'success');
+        showToast('评论填充成功！请在目标页面手动点击发布。', 'success');
       } else {
-        showToast('评论框定位失败！请确保评论区已加载完成（可以向下滚动网页刷新）。', 'error');
+        showToast('评论框定位失败！请确保评论区已加载完成（可以向下滚动网页）。', 'error');
       }
     });
   };
 
-  // 6. 备忘录模板管理
+  // 6. 批量在后台新标签页打开视频并填充评论
+  const handleBatchInjectComments = () => {
+    if (selectedPostIds.length === 0) {
+      showToast('请先勾选需要填充的视频', 'error');
+      return;
+    }
+    if (!replyText.trim()) {
+      showToast('请编写回复评论的内容', 'error');
+      return;
+    }
+    if (typeof chrome === 'undefined' || !chrome.tabs) {
+      showToast('当前环境不支持批量操作', 'error');
+      return;
+    }
+
+    setIsInjecting(true);
+    showToast(`正在启动批量任务，将处理 ${selectedPostIds.length} 个视频...`, 'info');
+
+    const selectedPostsData = posts.filter(p => selectedPostIds.includes(p.id));
+
+    selectedPostsData.forEach((post, index) => {
+      // 间隔 2 秒依次在后台打开，防浏览器卡顿与过度操作
+      setTimeout(() => {
+        chrome.tabs.create({ url: post.pageUrl, active: false }, (tab) => {
+          if (!tab || !tab.id) return;
+          const tabId = tab.id;
+
+          // 注册加载监听器，页面 Load 完毕后填充
+          const loadListener = (updatedTabId: number, changeInfo: any) => {
+            if (updatedTabId === tabId && changeInfo.status === 'complete') {
+              // 延迟 1.5 秒确保 Content Script 初始化和组件渲染
+              setTimeout(() => {
+                chrome.tabs.sendMessage(tabId, {
+                  type: 'INJECT_COMMENT',
+                  postId: post.id,
+                  commentText: replyText
+                }, (response) => {
+                  if (chrome.runtime.lastError) {
+                    console.warn(`Tab ${tabId} inject error:`, chrome.runtime.lastError);
+                  }
+                  // 移除本 tab 的监听器
+                  chrome.tabs.onUpdated.removeListener(loadListener);
+                });
+              }, 1500);
+            }
+          };
+
+          chrome.tabs.onUpdated.addListener(loadListener);
+        });
+
+        // 最后一个任务分发完毕后复位 loading
+        if (index === selectedPostsData.length - 1) {
+          setIsInjecting(false);
+          showToast(`已成功在后台打开 ${selectedPostsData.length} 个视频并自动填充回复！请切换过去手动发送即可。`, 'success');
+        }
+      }, index * 2000);
+    });
+  };
+
+  // 7. 备忘录模板管理
   const handleAddMemo = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMemoTitle.trim() || !newMemoContent.trim()) {
@@ -341,6 +397,31 @@ export default function Sidebar() {
     p.content.toLowerCase().includes(searchFilter.toLowerCase()) ||
     p.author.toLowerCase().includes(searchFilter.toLowerCase())
   );
+
+  // 单选/多选卡片交互
+  const handleSelectCard = (post: Post) => {
+    setSelectedPost(post);
+    // 单击卡片时，也自动将该视频设为多选里的唯一选中（或添加）
+    if (!selectedPostIds.includes(post.id)) {
+      setSelectedPostIds([post.id]);
+    }
+  };
+
+  const handleToggleCheckbox = (postId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedPostIds(prev => [...prev, postId]);
+      // 自动把第一个勾选的设为当前单选目标
+      if (!selectedPost) {
+        const p = posts.find(item => item.id === postId);
+        if (p) setSelectedPost(p);
+      }
+    } else {
+      setSelectedPostIds(prev => prev.filter(id => id !== postId));
+      if (selectedPost?.id === postId) {
+        setSelectedPost(null);
+      }
+    }
+  };
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden text-sm">
@@ -405,8 +486,10 @@ export default function Sidebar() {
           }`}
         >
           📝 快捷回复
-          {selectedPost && (
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-500 ring-2 ring-slate-900" />
+          {selectedPostIds.length > 0 && (
+            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.1 bg-indigo-500 text-white rounded-full text-[8px] font-bold scale-90">
+              {selectedPostIds.length}
+            </span>
           )}
         </button>
         <button
@@ -431,14 +514,14 @@ export default function Sidebar() {
         </button>
       </nav>
 
-      {/* Main 主界面视图 */}
-      <main className="flex-1 overflow-y-auto p-4 min-h-0 bg-slate-950">
+      {/* Main 主界面视图 - 改造为自适应弹性盒子 */}
+      <main className="flex-1 flex flex-col min-h-0 bg-slate-950 p-4 overflow-hidden">
         
         {/* VIEW 1: 视频发现与抓取 */}
         {activeTab === 'search' && (
-          <div className="space-y-4">
+          <div className="flex flex-col h-full space-y-4 min-h-0">
             {/* 快捷搜 */}
-            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
+            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 shrink-0">
               <h2 className="text-xs font-semibold text-slate-400 mb-2 tracking-wide uppercase">快捷词库检索</h2>
               <div className="flex flex-wrap gap-1.5">
                 {keywords.length > 0 ? (
@@ -458,7 +541,7 @@ export default function Sidebar() {
             </div>
 
             {/* 抓取操作 */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 shrink-0">
               <button
                 onClick={handleExtractPosts}
                 disabled={isLoadingPosts}
@@ -483,11 +566,18 @@ export default function Sidebar() {
               )}
             </div>
 
-            {/* 抓取结果展示 */}
-            {posts.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-t border-slate-800/60 pt-3">
-                  <h3 className="text-xs font-semibold text-slate-400">提取结果 ({filteredPosts.length})</h3>
+            {/* 抓取结果展示 - 实现 Flex 填充与独立滚动以去除留白 */}
+            {posts.length > 0 ? (
+              <div className="flex-1 min-h-0 flex flex-col space-y-3 pt-3 border-t border-slate-800/60">
+                <div className="flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-semibold text-slate-400">提取视频 ({filteredPosts.length})</h3>
+                    {selectedPostIds.length > 0 && (
+                      <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/10">
+                        已选 {selectedPostIds.length} 个
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     placeholder="过滤视频/UP主..."
@@ -497,23 +587,34 @@ export default function Sidebar() {
                   />
                 </div>
 
-                <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+                {/* 滚动卡片列表，无高度限制，完美自适应 */}
+                <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 min-h-0">
                   {filteredPosts.map((post) => (
                     <div
                       key={post.id}
-                      onClick={() => setSelectedPost(post)}
+                      onClick={() => handleSelectCard(post)}
                       className={`p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col gap-1.5 ${
-                        selectedPost?.id === post.id
+                        selectedPost?.id === post.id || selectedPostIds.includes(post.id)
                           ? 'bg-indigo-950/30 border-indigo-500/50 shadow-md shadow-indigo-500/5'
                           : 'bg-slate-900/40 border-slate-800/80 hover:border-slate-700/60 hover:bg-slate-900/60'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                          post.platform === 'bilibili' ? 'bg-sky-500/20 text-sky-400' : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {post.platform === 'bilibili' ? 'B站' : 'YT'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {/* 增加复选框用于多选发送 */}
+                          <input
+                            type="checkbox"
+                            checked={selectedPostIds.includes(post.id)}
+                            onClick={(e) => e.stopPropagation()} // 阻止触发卡片的选中逻辑
+                            onChange={(e) => handleToggleCheckbox(post.id, e.target.checked)}
+                            className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500/40 focus:ring-offset-0 transition-colors cursor-pointer"
+                          />
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                            post.platform === 'bilibili' ? 'bg-sky-500/20 text-sky-400' : 'bg-red-500/20 text-red-400'
+                          }`}>
+                            {post.platform === 'bilibili' ? 'B站' : 'YT'}
+                          </span>
+                        </div>
                         <span className="text-slate-400 text-xs font-medium truncate max-w-[140px]">
                           👤 {post.author}
                         </span>
@@ -551,71 +652,94 @@ export default function Sidebar() {
                   ))}
                 </div>
               </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center border-t border-slate-800/60 text-slate-500 text-xs">
+                暂无抓取数据，请先抓取视频
+              </div>
             )}
           </div>
         )}
 
         {/* VIEW 2: 快捷回复编辑与填充 */}
         {activeTab === 'reply' && (
-          <div className="space-y-4">
-            {/* 选中视频提示 */}
-            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80">
-              <span className="text-[10px] font-semibold text-slate-400 block mb-1">当前目标视频：</span>
-              {selectedPost ? (
-                <div>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className={`text-[9px] px-1 py-0.2 rounded font-semibold ${
-                      selectedPost.platform === 'bilibili' ? 'bg-sky-500/20 text-sky-400' : 'bg-red-500/20 text-red-400'
-                    }`}>
-                      {selectedPost.platform === 'bilibili' ? 'B站' : 'YT'}
-                    </span>
-                    <span className="font-semibold text-xs text-slate-200 truncate max-w-[200px]">
-                      {selectedPost.author}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-300 line-clamp-1 italic">
-                    "{selectedPost.content}"
-                  </p>
+          <div className="flex flex-col h-full space-y-4 min-h-0">
+            {/* 选中视频提示 - 改造成支持多选展示 */}
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 shrink-0">
+              <span className="text-[10px] font-semibold text-slate-400 block mb-1.5">当前勾选的发送目标 ({selectedPostIds.length}个)：</span>
+              {selectedPostIds.length > 0 ? (
+                <div className="space-y-1.5 max-h-[110px] overflow-y-auto pr-1">
+                  {posts.filter(p => selectedPostIds.includes(p.id)).map((post) => (
+                    <div key={post.id} className="flex items-center justify-between text-xs text-slate-300 bg-slate-950/40 p-1.5 rounded border border-slate-900/80">
+                      <div className="flex items-center gap-1.5 truncate flex-1 mr-2">
+                        <span className={`text-[9px] px-1 py-0.2 rounded font-semibold ${
+                          post.platform === 'bilibili' ? 'bg-sky-500/20 text-sky-400' : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {post.platform === 'bilibili' ? 'B站' : 'YT'}
+                        </span>
+                        <span className="truncate italic">"{post.content}"</span>
+                      </div>
+                      <button
+                        onClick={() => handleToggleCheckbox(post.id, false)}
+                        className="text-slate-500 hover:text-rose-400 text-[10px] font-semibold"
+                        title="移出发送列表"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <p className="text-xs text-slate-500">
-                  ⚠️ 尚未选择视频。请在“视频发现”中点击一个视频进行选中。
+                  ⚠️ 您还没有在“视频发现”中勾选任何视频。请先勾选视频以开启一键批量填充。
                 </p>
               )}
             </div>
 
             {/* 回复输入框 */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-400">回复评论内容</label>
+            <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-400 shrink-0">回复评论内容</label>
               <textarea
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
                 placeholder="在此编写您的推广回复、评论话术或营销内容..."
-                rows={7}
-                className="w-full p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40 resize-none leading-relaxed"
+                className="flex-1 p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40 resize-none leading-relaxed"
               />
-              <div className="flex justify-between items-center text-[10px] text-slate-500">
+              <div className="flex justify-between items-center text-[10px] text-slate-500 shrink-0">
                 <span>*注意：本插件仅为您填充，最终发送由您在页面上手动确认</span>
                 <span>{replyText.length} 字</span>
               </div>
             </div>
 
-            {/* 填充执行 */}
-            <button
-              onClick={handleInjectComment}
-              disabled={isInjecting || !selectedPost || !replyText.trim()}
-              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
-            >
-              {isInjecting ? '正在填充...' : '⚡ 一键填充到页面'}
-            </button>
+            {/* 填充执行 - 根据选中项智能选择单发/群发 */}
+            {selectedPostIds.length > 1 ? (
+              <button
+                onClick={handleBatchInjectComments}
+                disabled={isInjecting || !replyText.trim()}
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 shrink-0"
+              >
+                {isInjecting ? (
+                  <>正在逐个执行后台填充...</>
+                ) : (
+                  <>⚡ 一键批量在后台打开并填充评论 ({selectedPostIds.length}个视频)</>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={handleInjectComment}
+                disabled={isInjecting || !selectedPost || !replyText.trim()}
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 shrink-0"
+              >
+                {isInjecting ? '正在填充...' : '⚡ 一键填充到当前视频页面'}
+              </button>
+            )}
           </div>
         )}
 
         {/* VIEW 3: 话术模板管理 */}
         {activeTab === 'memos' && (
-          <div className="space-y-4">
+          <div className="flex flex-col h-full space-y-4 min-h-0">
             {/* 新增模板表单 */}
-            <form onSubmit={handleAddMemo} className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/80 space-y-2.5">
+            <form onSubmit={handleAddMemo} className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/80 space-y-2.5 shrink-0">
               <h3 className="text-xs font-semibold text-slate-300">添加快捷回复模板</h3>
               <input
                 type="text"
@@ -648,10 +772,10 @@ export default function Sidebar() {
               </div>
             </form>
 
-            {/* 模板列表 */}
-            <div className="space-y-2">
-              <h3 className="text-xs font-semibold text-slate-400">已存模板 ({memos.length})</h3>
-              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+            {/* 模板列表 - 高度自适应 */}
+            <div className="flex-1 min-h-0 flex flex-col space-y-2">
+              <h3 className="text-xs font-semibold text-slate-400 shrink-0">已存模板 ({memos.length})</h3>
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2 min-h-0">
                 {memos.map((memo) => (
                   <div key={memo.id} className="p-3 bg-slate-900/40 border border-slate-800/80 rounded-xl flex flex-col gap-1.5 hover:border-slate-700/60">
                     <div className="flex items-center justify-between">
@@ -698,9 +822,9 @@ export default function Sidebar() {
 
         {/* VIEW 4: 设置中心 */}
         {activeTab === 'settings' && (
-          <div className="space-y-4">
+          <div className="flex flex-col h-full space-y-4 min-h-0 overflow-y-auto">
             {/* 添加快捷词 */}
-            <form onSubmit={handleAddKeyword} className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-2">
+            <form onSubmit={handleAddKeyword} className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-2 shrink-0">
               <h3 className="text-xs font-semibold text-slate-300">添加快捷检索关键词</h3>
               <div className="flex gap-2">
                 <input
@@ -720,9 +844,9 @@ export default function Sidebar() {
             </form>
 
             {/* 关键词管理列表 */}
-            <div className="space-y-2">
+            <div className="space-y-2 shrink-0">
               <h3 className="text-xs font-semibold text-slate-400">词库管理</h3>
-              <div className="max-h-[220px] overflow-y-auto pr-1 border border-slate-900 rounded-xl">
+              <div className="max-h-[180px] overflow-y-auto pr-1 border border-slate-900 rounded-xl">
                 {keywords.map(kw => (
                   <div key={kw.id} className="flex items-center justify-between px-3 py-2 border-b border-slate-900 last:border-0 bg-slate-900/20">
                     <span className="text-slate-300 text-xs">{kw.text}</span>
@@ -738,7 +862,7 @@ export default function Sidebar() {
             </div>
             
             {/* 项目申明 */}
-            <div className="p-3 bg-indigo-950/10 border border-indigo-500/10 rounded-xl text-[10px] text-slate-500 leading-relaxed">
+            <div className="p-3 bg-indigo-950/10 border border-indigo-500/10 rounded-xl text-[10px] text-slate-500 leading-relaxed shrink-0">
               <p className="font-semibold text-slate-400 mb-1">🔒 安全性与合规声明：</p>
               <p>本插件所有数据（包括检索词、回复文本及分析缓存）均安全保存在您的本地浏览器中，绝不上报或泄露。本插件不代理任何自动评论发布，所有填充后提交动作完全由用户手动触发，遵守相关网站之 ToS。</p>
             </div>

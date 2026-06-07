@@ -11,6 +11,16 @@ export class BilibiliAdapter extends BaseAdapter {
     
     cards.forEach((card, index) => {
       try {
+        // 过滤非视频卡片：如UP主用户卡片、直播卡片等，防止干扰热门视频判断
+        if (
+          card.classList.contains('user-item') || 
+          card.querySelector('.up-face') || 
+          card.querySelector('.bili-user-card') ||
+          card.querySelector('.bili-liver-card')
+        ) {
+          return;
+        }
+
         // 查找视频链接
         const linkEl = card.querySelector('a[href*="/video/"]') as HTMLAnchorElement | null;
         if (!linkEl) return;
@@ -35,13 +45,22 @@ export class BilibiliAdapter extends BaseAdapter {
         const authorEl = card.querySelector('.bili-video-card__info--author, .up-name, .up-info') as HTMLElement | null;
         const author = authorEl ? (authorEl.textContent || '').trim() : 'Bilibili UP主';
         
-        // 提取播放量和弹幕数
-        // Bilibili 卡片会显示播放量和弹幕数
-        const playEl = card.querySelector('.bili-video-card__stats--play, .watch-num, .play-text') as HTMLElement | null;
-        const danmakuEl = card.querySelector('.bili-video-card__stats--danmaku, .hide-danmaku, .danmaku-text') as HTMLElement | null;
+        // 提取播放量和弹幕数 (解决都是 0 的问题)
+        let playText = '';
+        let danmakuText = '';
         
-        const playText = playEl ? playEl.textContent || '' : '0';
-        const danmakuText = danmakuEl ? danmakuEl.textContent || '' : '0';
+        // B站新版页面结构将数字均放入 .bili-video-card__stats--text，第1个为播放量，第2个为弹幕数
+        const statsTextEls = card.querySelectorAll('.bili-video-card__stats--text');
+        if (statsTextEls.length >= 2) {
+          playText = statsTextEls[0].textContent || '0';
+          danmakuText = statsTextEls[1].textContent || '0';
+        } else {
+          // 兼容旧版选择器
+          const playEl = card.querySelector('.bili-video-card__stats--play, .watch-num, .play-text') as HTMLElement | null;
+          const danmakuEl = card.querySelector('.bili-video-card__stats--danmaku, .hide-danmaku, .danmaku-text') as HTMLElement | null;
+          playText = playEl ? playEl.textContent || '0' : '0';
+          danmakuText = danmakuEl ? danmakuEl.textContent || '0' : '0';
+        }
         
         const playCount = this.parseNumber(playText);
         const danmakuCount = this.parseNumber(danmakuText);
