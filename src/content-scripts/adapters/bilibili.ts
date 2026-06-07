@@ -72,8 +72,49 @@ export class BilibiliAdapter extends BaseAdapter {
     return results.filter((element, index, arr) => arr.indexOf(element) === index);
   }
 
+  private queryDeepWithin(rootElement: HTMLElement, selectors: string): HTMLElement | null {
+    if (rootElement.matches(selectors)) return rootElement;
+
+    const lightDomMatch = rootElement.querySelector(selectors) as HTMLElement | null;
+    if (lightDomMatch) return lightDomMatch;
+
+    const shadowRoot = rootElement.shadowRoot;
+    if (!shadowRoot) return null;
+
+    const shadowMatch = shadowRoot.querySelector(selectors) as HTMLElement | null;
+    if (shadowMatch) return shadowMatch;
+
+    for (const child of Array.from(shadowRoot.querySelectorAll('*')) as HTMLElement[]) {
+      const nestedMatch = this.queryDeepWithin(child, selectors);
+      if (nestedMatch) return nestedMatch;
+    }
+
+    return null;
+  }
+
+  private resolveCommentEditor(element: HTMLElement): HTMLElement | null {
+    const editorSelectors = [
+      'textarea',
+      'input[type="text"]',
+      '[contenteditable]',
+      '#editor.active',
+      '#editor'
+    ].join(', ');
+
+    const editor = this.queryDeepWithin(element, editorSelectors);
+    return editor && this.isVisible(editor) ? editor : null;
+  }
+
   private findCommentInput(): HTMLTextAreaElement | HTMLInputElement | HTMLElement | null {
     const selectors = [
+      'bili-comments-header-renderer #editor.active',
+      'bili-comments-header-renderer #editor',
+      'bili-comments-comment-box #editor.active',
+      'bili-comments-comment-box #editor',
+      'bili-comments-rich-textarea #editor.active',
+      'bili-comments-rich-textarea #editor',
+      'bili-comments-rich-textarea',
+      '#editor.active',
       'textarea.reply-box-textarea',
       '.reply-box-textarea',
       '.reply-textarea',
@@ -96,11 +137,11 @@ export class BilibiliAdapter extends BaseAdapter {
     for (const selector of selectors) {
       const element = this.queryAllDeep(selector).find(candidate => this.isVisible(candidate));
       if (!element) continue;
-      const innerEditable = element.matches('textarea, input, [contenteditable]')
-        ? element
-        : element.querySelector('textarea, input, [contenteditable]') as HTMLElement | null;
-      if (innerEditable && this.isVisible(innerEditable)) return innerEditable;
-      if (element.matches('.reply-box-textarea, .reply-textarea, .bili-rich-textarea__inner, bili-rich-textarea')) {
+
+      const innerEditable = this.resolveCommentEditor(element);
+      if (innerEditable) return innerEditable;
+
+      if (element.matches('#editor.active, #editor, .reply-box-textarea, .reply-textarea, .bili-rich-textarea__inner, bili-rich-textarea, bili-comments-rich-textarea')) {
         return element;
       }
     }
@@ -126,7 +167,7 @@ export class BilibiliAdapter extends BaseAdapter {
       activeElement instanceof HTMLTextAreaElement ||
       activeElement instanceof HTMLInputElement ||
       activeElement.hasAttribute('contenteditable') ||
-      activeElement.matches('.reply-box-textarea, .reply-textarea, .bili-rich-textarea__inner')
+      activeElement.matches('#editor.active, #editor, .reply-box-textarea, .reply-textarea, .bili-rich-textarea__inner')
     )
       ? activeElement
       : input;
@@ -186,7 +227,12 @@ export class BilibiliAdapter extends BaseAdapter {
       '.reply-box .reply-box-send',
       '.bili-comment-container button',
       '.reply-box button',
+      'bili-comments-header-renderer button',
+      'bili-comments-comment-box button',
+      'bili-comments-rich-textarea button',
       'button[class*="send"]',
+      'button[class*="pub"]',
+      '[id*="pub"]',
       '[class*="send"]'
     ];
 
@@ -287,7 +333,7 @@ export class BilibiliAdapter extends BaseAdapter {
       
       if (input) break;
       
-      const commentAnchor = this.queryAllDeep('#comment, .comment, .bili-comment-container, .reply-container, #reply-commentbox')
+      const commentAnchor = this.queryAllDeep('#comment, .comment, .bili-comment-container, .reply-container, #reply-commentbox, bili-comments-header-renderer, bili-comments-comment-box, bili-comments-rich-textarea')
         .find(element => this.isVisible(element));
       if (commentAnchor) {
         commentAnchor.scrollIntoView({ behavior: 'auto', block: 'center' });
