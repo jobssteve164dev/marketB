@@ -53,27 +53,57 @@ export class BilibiliAdapter extends BaseAdapter {
     return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
   }
 
+  private queryAllDeep(selectors: string): HTMLElement[] {
+    const results: HTMLElement[] = [];
+    const visited = new Set<Document | ShadowRoot>();
+
+    const collect = (root: Document | ShadowRoot) => {
+      if (visited.has(root)) return;
+      visited.add(root);
+
+      results.push(...Array.from(root.querySelectorAll(selectors)) as HTMLElement[]);
+      Array.from(root.querySelectorAll('*')).forEach((element) => {
+        const shadowRoot = (element as HTMLElement).shadowRoot;
+        if (shadowRoot) collect(shadowRoot);
+      });
+    };
+
+    collect(document);
+    return results.filter((element, index, arr) => arr.indexOf(element) === index);
+  }
+
   private findCommentInput(): HTMLTextAreaElement | HTMLInputElement | HTMLElement | null {
     const selectors = [
       'textarea.reply-box-textarea',
+      '.reply-box-textarea',
+      '.reply-textarea',
+      '#reply-commentbox',
+      '#reply-commentbox [contenteditable]',
+      'bili-rich-textarea',
+      'bili-rich-textarea [contenteditable]',
+      '.bili-rich-textarea__inner',
+      '.bili-rich-textarea__inner[contenteditable]',
       'textarea[placeholder*="发一条"]',
       'textarea[placeholder*="评论"]',
       'textarea.ipt-txt',
-      '.reply-box-textarea[contenteditable="true"]',
-      '.reply-textarea[contenteditable="true"]',
-      '.reply-box [contenteditable="true"]',
-      '.reply-box-warp [contenteditable="true"]',
-      '.bili-comment-container [contenteditable="true"]',
-      '[contenteditable="true"][data-placeholder*="评论"]',
-      '[contenteditable="true"][placeholder*="评论"]'
+      '.reply-box [contenteditable]',
+      '.reply-box-warp [contenteditable]',
+      '.bili-comment-container [contenteditable]',
+      '[contenteditable][data-placeholder*="评论"]',
+      '[contenteditable][placeholder*="评论"]',
+      '[contenteditable][aria-label*="评论"]'
     ];
 
     for (const selector of selectors) {
-      const element = document.querySelector(selector) as HTMLElement | null;
-      if (element && this.isVisible(element)) return element;
+      const element = this.queryAllDeep(selector).find(candidate => this.isVisible(candidate));
+      if (!element) continue;
+      const innerEditable = element.matches('textarea, input, [contenteditable]')
+        ? element
+        : element.querySelector('textarea, input, [contenteditable]') as HTMLElement | null;
+      return innerEditable && this.isVisible(innerEditable) ? innerEditable : element;
     }
 
-    return Array.from(document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]'))
+    return this.queryAllDeep('textarea, input[type="text"], [contenteditable]')
       .find((element) => {
         const target = element as HTMLElement;
         const text = [
@@ -98,9 +128,24 @@ export class BilibiliAdapter extends BaseAdapter {
       valueSetter?.call(input, commentText);
       if (input.value !== commentText) input.value = commentText;
     } else {
-      input.textContent = commentText;
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+
+      const inserted = document.execCommand?.('insertText', false, commentText);
+      if (!inserted || (input.textContent || '').trim() !== commentText.trim()) {
+        input.textContent = commentText;
+      }
     }
 
+    input.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: commentText
+    }));
     input.dispatchEvent(new InputEvent('input', {
       bubbles: true,
       cancelable: true,
@@ -108,6 +153,7 @@ export class BilibiliAdapter extends BaseAdapter {
       data: commentText
     }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter' }));
 
     const currentValue = input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement
       ? input.value
@@ -121,18 +167,24 @@ export class BilibiliAdapter extends BaseAdapter {
       'button.reply-box-send',
       '.send-btn',
       '.reply-btn',
+      '.bili-comment-container .reply-box-send',
+      '.reply-box .reply-box-send',
       '.bili-comment-container button',
       '.reply-box button',
-      'button[class*="send"]'
+      'button[class*="send"]',
+      '[class*="send"]'
     ];
 
     const candidates = selectors
-      .flatMap(selector => Array.from(document.querySelectorAll(selector)) as HTMLElement[])
+      .flatMap(selector => this.queryAllDeep(selector))
       .filter((element, index, arr) => arr.indexOf(element) === index)
       .filter((element) => {
-        const text = `${element.textContent || ''} ${element.getAttribute('aria-label') || ''}`;
-        const disabled = element.getAttribute('disabled') !== null || element.getAttribute('aria-disabled') === 'true';
-        return this.isVisible(element) && !disabled && /发布|发送|评论|回复/i.test(text);
+        const text = `${element.textContent || ''} ${element.getAttribute('aria-label') || ''} ${element.className || ''}`;
+        const classText = typeof element.className === 'string' ? element.className : '';
+        const disabled = element.getAttribute('disabled') !== null ||
+          element.getAttribute('aria-disabled') === 'true' ||
+          /disabled|disable/i.test(classText);
+        return this.isVisible(element) && !disabled && /发布|发送|评论|回复|send|reply/i.test(text);
       });
 
     return candidates[0] || null;
@@ -220,7 +272,8 @@ export class BilibiliAdapter extends BaseAdapter {
       
       if (input) break;
       
-      const commentAnchor = document.querySelector('#comment, .comment, .bili-comment-container, .reply-container') as HTMLElement | null;
+      const commentAnchor = this.queryAllDeep('#comment, .comment, .bili-comment-container, .reply-container, #reply-commentbox')
+        .find(element => this.isVisible(element));
       if (commentAnchor) {
         commentAnchor.scrollIntoView({ behavior: 'auto', block: 'center' });
       } else {
