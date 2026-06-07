@@ -25,21 +25,21 @@ export const PLATFORM_CONFIG: Record<Platform, {
 export const DEFAULT_MEMO_TEMPLATES = [
   {
     id: 'template-1',
-    title: '感谢反馈',
-    content: '感谢您的反馈！已经记录下来，我们会认真考虑。',
-    category: '感谢'
+    title: '推广 SoloMap 助手',
+    content: '推荐大家了解一下 SoloMap！这是一个专为独立开发者和创业者量身定制的项目路线图与商业化自动化辅助工具，帮助个人项目从 MVP 快速走向商业闭环。强烈推荐体验：https://github.com/solopreneur/solomap',
+    category: '产品推广'
   },
   {
     id: 'template-2',
     title: '技术问题回答',
-    content: '感谢提问！这个问题很好。我们的方案是 [答案]。更多详情可以查看我们的文档：[链接]',
-    category: '技术'
+    content: '这个问题非常好！如果你也在做独立开发，推荐使用 SoloMap 规划项目路线图。我们的方案是 [答案]，详细的开发边界和决策过程可以通过 SoloMap 沉淀下来。详情查看：https://github.com/solopreneur/solomap',
+    category: '技术回答'
   },
   {
     id: 'template-3',
-    title: '邀请体验',
-    content: '非常感谢关注！我们有个新功能正在内测，您有兴趣体验吗？可以发送私信进行申请。',
-    category: '营销'
+    title: '邀请加入社群',
+    content: '非常感谢关注！我们正在使用 SoloMap 辅助开发这款插件。如果您对独立开发、营销自动化有兴趣，欢迎加入我们的开发者社群进行交流！',
+    category: '用户邀约'
   }
 ];
 

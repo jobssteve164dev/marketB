@@ -92,14 +92,24 @@ export class BilibiliAdapter extends BaseAdapter {
     return posts.sort((a, b) => b.heatScore - a.heatScore);
   }
 
-  async injectComment(postId: string, commentText: string): Promise<boolean> {
-    // 尝试寻找 Bilibili 播放页的评论框
-    const textarea = document.querySelector(
-      'textarea.reply-box-textarea, .reply-textarea, .reply-box-textarea, textarea[placeholder*="发一条"], textarea[placeholder*="评论"], textarea.ipt-txt'
-    ) as HTMLTextAreaElement | null;
+  async injectComment(postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean> {
+    let textarea: HTMLTextAreaElement | null = null;
+    
+    // 轮询最多 10 次检测，若未渲染则每次滚动并等待 300ms 触发懒加载
+    for (let i = 0; i < 10; i++) {
+      textarea = document.querySelector(
+        'textarea.reply-box-textarea, .reply-textarea, .reply-box-textarea, textarea[placeholder*="发一条"], textarea[placeholder*="评论"], textarea.ipt-txt'
+      ) as HTMLTextAreaElement | null;
+      
+      if (textarea) break;
+      
+      // 未发现输入框时，自动轻微向下滚动页面以触发评论区懒加载
+      window.scrollBy(0, 350);
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
     
     if (!textarea) {
-      console.warn('Bilibili comment input textarea not found.');
+      console.warn('Bilibili comment input textarea not found after retries.');
       return false;
     }
     
@@ -112,6 +122,28 @@ export class BilibiliAdapter extends BaseAdapter {
     
     // 平滑滚动至评论输入框
     textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    
+    // 自动发布并关闭页面模式
+    if (autoSubmit) {
+      // 延迟 800ms 等待 React 组件将输入内容绑定到组件状态
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
+      // 定位发送按钮
+      const sendButton = document.querySelector(
+        '.reply-box-send, button.reply-box-send, .send-btn, .reply-btn, button[class*="send"]'
+      ) as HTMLElement | null;
+      
+      if (sendButton) {
+        sendButton.click();
+        
+        // 延迟 2 秒保证接口发送请求发出，然后通知后台关闭此页
+        setTimeout(() => {
+          chrome.runtime.sendMessage({ type: 'CLOSE_TAB' });
+        }, 2000);
+      } else {
+        console.warn('Bilibili send/submit button not found.');
+      }
+    }
     
     return true;
   }

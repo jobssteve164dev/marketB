@@ -20,9 +20,9 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
       sendResponse({ success: false, error: err.message || 'Error occurred while extracting posts.' });
     }
   } else if (message.type === 'INJECT_COMMENT') {
-    const { postId, commentText } = message;
+    const { postId, commentText, autoSubmit } = message;
     // 异步执行评论填充
-    adapter.injectComment(postId, commentText)
+    adapter.injectComment(postId, commentText, autoSubmit)
       .then(success => {
         sendResponse({ success });
       })

@@ -69,39 +69,70 @@ export class YoutubeAdapter extends BaseAdapter {
     return posts.sort((a, b) => b.heatScore - a.heatScore);
   }
 
-  async injectComment(postId: string, commentText: string): Promise<boolean> {
+  async injectComment(postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean> {
     try {
-      // YouTube 评论区是懒加载的，必须先轻微向下滚动页面才能触发渲染
-      window.scrollBy(0, 350);
+      let placeholderArea: HTMLElement | null = null;
+      let inputArea: HTMLElement | null = null;
       
-      // 等待 1.5 秒评论区渲染
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // 查找占位输入区并点击，以此激活加载完整的富文本编辑器
-      const placeholderArea = document.querySelector('#simplebox-placeholder') as HTMLElement | null;
-      if (placeholderArea) {
-        placeholderArea.click();
-        await new Promise(resolve => setTimeout(resolve, 500));
+      // 轮询滚动以加载评论区
+      for (let i = 0; i < 10; i++) {
+        // 先尝试查找占位符和输入区
+        placeholderArea = document.querySelector('#simplebox-placeholder') as HTMLElement | null;
+        inputArea = document.querySelector(
+          '#contenteditable-root, div[contenteditable="true"]#contenteditable-root, ytd-commentbox-renderer #contenteditable-root'
+        ) as HTMLElement | null;
+        
+        if (placeholderArea || inputArea) break;
+        
+        // 自动轻微滚动，触发 YouTube 评论区懒加载
+        window.scrollBy(0, 350);
+        await new Promise(resolve => setTimeout(resolve, 350));
       }
       
-      // 寻找真正的输入编辑框（YouTube 使用 contenteditable 的 div）
-      const inputArea = document.querySelector(
-        '#contenteditable-root, div[contenteditable="true"]#contenteditable-root, ytd-commentbox-renderer #contenteditable-root'
-      ) as HTMLElement | null;
+      // 如果找到了占位符，模拟点击展开真实的输入框
+      if (placeholderArea && !inputArea) {
+        placeholderArea.click();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        inputArea = document.querySelector(
+          '#contenteditable-root, div[contenteditable="true"]#contenteditable-root, ytd-commentbox-renderer #contenteditable-root'
+        ) as HTMLElement | null;
+      }
       
       if (!inputArea) {
-        console.warn('YouTube comment input editor not found.');
+        console.warn('YouTube comment input editor not found after scrolling retries.');
         return false;
       }
       
       inputArea.focus();
       inputArea.innerText = commentText;
       
-      // 触发输入事件使 YouTube 框架内的保存按钮高亮可用
+      // 触发输入事件使 YouTube 框架内的“评论”按钮高亮可用
       inputArea.dispatchEvent(new Event('input', { bubbles: true }));
       
       // 滚动到该输入区域以便用户看到
       inputArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // 自动提交评论模式
+      if (autoSubmit) {
+        // 延迟等待数据同步
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        // 查找 YouTube 评论提交按钮
+        const submitBtn = document.querySelector(
+          'ytd-button-renderer#submit-button button, ytd-button-renderer#submit-button a, #submit-button paper-button, ytd-button-renderer#submit-button'
+        ) as HTMLElement | null;
+        
+        if (submitBtn) {
+          submitBtn.click();
+          
+          // 延迟 2.5 秒保证 YouTube 的评论提交接口返回，然后通知后台关闭当前页
+          setTimeout(() => {
+            chrome.runtime.sendMessage({ type: 'CLOSE_TAB' });
+          }, 2500);
+        } else {
+          console.warn('YouTube comment submit button not found.');
+        }
+      }
       
       return true;
     } catch (err) {

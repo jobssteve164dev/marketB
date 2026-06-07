@@ -14,6 +14,14 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PING') {
     sendResponse({ success: true, status: 'alive' });
+  } else if (message.type === 'CLOSE_TAB') {
+    if (sender.tab && sender.tab.id) {
+      // 自动关闭触发了发送成功的页面
+      chrome.tabs.remove(sender.tab.id);
+      sendResponse({ success: true });
+    } else {
+      sendResponse({ success: false, error: 'No tab ID found in sender' });
+    }
   }
   return true;
 });

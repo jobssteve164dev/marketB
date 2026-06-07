@@ -24,6 +24,8 @@ export default function Sidebar() {
   // 评论回复编辑
   const [replyText, setReplyText] = useState('');
   const [isInjecting, setIsInjecting] = useState(false);
+  const [autoSubmit, setAutoSubmit] = useState(true); // 是否开启自动发布评论并自动关闭标签页
+
   
   // 当前浏览器活动 Tab 的环境状态
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
@@ -265,18 +267,24 @@ export default function Sidebar() {
     chrome.tabs.sendMessage(currentTabId, { 
       type: 'INJECT_COMMENT',
       postId: selectedPost.id,
-      commentText: replyText 
+      commentText: replyText,
+      autoSubmit: autoSubmit
     }, (response) => {
       setIsInjecting(false);
       if (chrome.runtime.lastError) {
-        showToast('填充失败。请确保您当前处于该视频播放页，且已滑动显示评论区。', 'error');
+        showToast('填充失败。请确保您当前处于该视频播放页，并且网页评论区已加载。', 'error');
         return;
       }
 
       if (response && response.success) {
-        showToast('评论填充成功！请在目标页面手动点击发布。', 'success');
+        showToast(
+          autoSubmit 
+            ? '评论已自动填充并提交发布！页面稍后将自动关闭。' 
+            : '评论填充成功！请在目标页面手动点击发布。', 
+          'success'
+        );
       } else {
-        showToast('评论框定位失败！请确保评论区已加载完成（可以向下滚动网页）。', 'error');
+        showToast('评论框定位失败！请确保评论区已加载（可尝试手动滑动滚动条）。', 'error');
       }
     });
   };
@@ -316,7 +324,8 @@ export default function Sidebar() {
                 chrome.tabs.sendMessage(tabId, {
                   type: 'INJECT_COMMENT',
                   postId: post.id,
-                  commentText: replyText
+                  commentText: replyText,
+                  autoSubmit: autoSubmit
                 }, (response) => {
                   if (chrome.runtime.lastError) {
                     console.warn(`Tab ${tabId} inject error:`, chrome.runtime.lastError);
@@ -334,7 +343,12 @@ export default function Sidebar() {
         // 最后一个任务分发完毕后复位 loading
         if (index === selectedPostsData.length - 1) {
           setIsInjecting(false);
-          showToast(`已成功在后台打开 ${selectedPostsData.length} 个视频并自动填充回复！请切换过去手动发送即可。`, 'success');
+          showToast(
+            autoSubmit 
+              ? `已成功在后台打开 ${selectedPostsData.length} 个视频并完成自动发布！` 
+              : `已成功在后台打开 ${selectedPostsData.length} 个视频并自动填充回复！请切换过去手动发送即可。`, 
+            'success'
+          );
         }
       }, index * 2000);
     });
@@ -705,7 +719,15 @@ export default function Sidebar() {
                 className="flex-1 p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/40 resize-none leading-relaxed"
               />
               <div className="flex justify-between items-center text-[10px] text-slate-500 shrink-0">
-                <span>*注意：本插件仅为您填充，最终发送由您在页面上手动确认</span>
+                <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoSubmit}
+                    onChange={(e) => setAutoSubmit(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500/40 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span>🤖 自动发布并关闭标签页 (完全自动化)</span>
+                </label>
                 <span>{replyText.length} 字</span>
               </div>
             </div>
