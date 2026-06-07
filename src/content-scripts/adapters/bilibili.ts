@@ -77,7 +77,6 @@ export class BilibiliAdapter extends BaseAdapter {
       'textarea.reply-box-textarea',
       '.reply-box-textarea',
       '.reply-textarea',
-      '#reply-commentbox',
       '#reply-commentbox [contenteditable]',
       'bili-rich-textarea',
       'bili-rich-textarea [contenteditable]',
@@ -100,7 +99,10 @@ export class BilibiliAdapter extends BaseAdapter {
       const innerEditable = element.matches('textarea, input, [contenteditable]')
         ? element
         : element.querySelector('textarea, input, [contenteditable]') as HTMLElement | null;
-      return innerEditable && this.isVisible(innerEditable) ? innerEditable : element;
+      if (innerEditable && this.isVisible(innerEditable)) return innerEditable;
+      if (element.matches('.reply-box-textarea, .reply-textarea, .bili-rich-textarea__inner, bili-rich-textarea')) {
+        return element;
+      }
     }
 
     return this.queryAllDeep('textarea, input[type="text"], [contenteditable]')
@@ -117,47 +119,57 @@ export class BilibiliAdapter extends BaseAdapter {
   }
 
   private setCommentInputValue(input: HTMLTextAreaElement | HTMLInputElement | HTMLElement, commentText: string): boolean {
+    input.click();
     input.focus();
+    const activeElement = document.activeElement as HTMLElement | null;
+    const target = activeElement && this.isVisible(activeElement) && (
+      activeElement instanceof HTMLTextAreaElement ||
+      activeElement instanceof HTMLInputElement ||
+      activeElement.hasAttribute('contenteditable') ||
+      activeElement.matches('.reply-box-textarea, .reply-textarea, .bili-rich-textarea__inner')
+    )
+      ? activeElement
+      : input;
 
-    if (input instanceof HTMLTextAreaElement) {
+    if (target instanceof HTMLTextAreaElement) {
       const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-      valueSetter?.call(input, commentText);
-      if (input.value !== commentText) input.value = commentText;
-    } else if (input instanceof HTMLInputElement) {
+      valueSetter?.call(target, commentText);
+      if (target.value !== commentText) target.value = commentText;
+    } else if (target instanceof HTMLInputElement) {
       const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      valueSetter?.call(input, commentText);
-      if (input.value !== commentText) input.value = commentText;
+      valueSetter?.call(target, commentText);
+      if (target.value !== commentText) target.value = commentText;
     } else {
       const selection = window.getSelection();
       const range = document.createRange();
-      range.selectNodeContents(input);
+      range.selectNodeContents(target);
       selection?.removeAllRanges();
       selection?.addRange(range);
 
       const inserted = document.execCommand?.('insertText', false, commentText);
-      if (!inserted || (input.textContent || '').trim() !== commentText.trim()) {
-        input.textContent = commentText;
+      if (!inserted || (target.textContent || '').trim() !== commentText.trim()) {
+        target.innerText = commentText;
       }
     }
 
-    input.dispatchEvent(new InputEvent('beforeinput', {
+    target.dispatchEvent(new InputEvent('beforeinput', {
       bubbles: true,
       cancelable: true,
       inputType: 'insertText',
       data: commentText
     }));
-    input.dispatchEvent(new InputEvent('input', {
+    target.dispatchEvent(new InputEvent('input', {
       bubbles: true,
       cancelable: true,
       inputType: 'insertText',
       data: commentText
     }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter' }));
+    target.dispatchEvent(new Event('change', { bubbles: true }));
+    target.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter' }));
 
-    const currentValue = input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement
-      ? input.value
-      : input.textContent || '';
+    const currentValue = target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement
+      ? target.value
+      : target.textContent || '';
     return currentValue.trim() === commentText.trim();
   }
 
@@ -165,8 +177,11 @@ export class BilibiliAdapter extends BaseAdapter {
     const selectors = [
       '.reply-box-send',
       'button.reply-box-send',
+      '.send-text',
+      'button.send-text',
       '.send-btn',
       '.reply-btn',
+      '.reply-box .send-text',
       '.bili-comment-container .reply-box-send',
       '.reply-box .reply-box-send',
       '.bili-comment-container button',
