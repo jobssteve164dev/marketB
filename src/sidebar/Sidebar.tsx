@@ -303,7 +303,8 @@ export default function Sidebar() {
       } else {
         const results = response?.results || [];
         const failedCount = results.filter((result: { success: boolean }) => !result.success).length || targetPosts.length;
-        showToast(`${failedCount} 个视频未完成，请检查登录状态或评论区是否可用`, 'error');
+        const firstError = results.find((result: { success: boolean; error?: string }) => !result.success)?.error;
+        showToast(firstError || `${failedCount} 个视频未完成，评论区或发送按钮不可用`, 'error');
       }
     });
   };

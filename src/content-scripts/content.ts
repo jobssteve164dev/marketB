@@ -24,7 +24,10 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
     // 异步执行评论填充
     adapter.injectComment(postId, commentText, autoSubmit)
       .then(success => {
-        sendResponse({ success });
+        sendResponse({
+          success,
+          error: success ? undefined : '评论填充失败，未返回具体原因'
+        });
       })
       .catch(err => {
         sendResponse({ success: false, error: err.message || 'Error occurred while injecting comment.' });

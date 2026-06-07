@@ -47,6 +47,97 @@ export class BilibiliAdapter extends BaseAdapter {
     return match ? match[1] : '';
   }
 
+  private isVisible(element: HTMLElement): boolean {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+  }
+
+  private findCommentInput(): HTMLTextAreaElement | HTMLInputElement | HTMLElement | null {
+    const selectors = [
+      'textarea.reply-box-textarea',
+      'textarea[placeholder*="发一条"]',
+      'textarea[placeholder*="评论"]',
+      'textarea.ipt-txt',
+      '.reply-box-textarea[contenteditable="true"]',
+      '.reply-textarea[contenteditable="true"]',
+      '.reply-box [contenteditable="true"]',
+      '.reply-box-warp [contenteditable="true"]',
+      '.bili-comment-container [contenteditable="true"]',
+      '[contenteditable="true"][data-placeholder*="评论"]',
+      '[contenteditable="true"][placeholder*="评论"]'
+    ];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector) as HTMLElement | null;
+      if (element && this.isVisible(element)) return element;
+    }
+
+    return Array.from(document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]'))
+      .find((element) => {
+        const target = element as HTMLElement;
+        const text = [
+          target.getAttribute('placeholder'),
+          target.getAttribute('data-placeholder'),
+          target.getAttribute('aria-label'),
+          target.textContent
+        ].filter(Boolean).join(' ');
+        return this.isVisible(target) && /评论|回复|发一条|友善/i.test(text);
+      }) as HTMLElement | null;
+  }
+
+  private setCommentInputValue(input: HTMLTextAreaElement | HTMLInputElement | HTMLElement, commentText: string): boolean {
+    input.focus();
+
+    if (input instanceof HTMLTextAreaElement) {
+      const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      valueSetter?.call(input, commentText);
+      if (input.value !== commentText) input.value = commentText;
+    } else if (input instanceof HTMLInputElement) {
+      const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      valueSetter?.call(input, commentText);
+      if (input.value !== commentText) input.value = commentText;
+    } else {
+      input.textContent = commentText;
+    }
+
+    input.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+      data: commentText
+    }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    const currentValue = input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement
+      ? input.value
+      : input.textContent || '';
+    return currentValue.trim() === commentText.trim();
+  }
+
+  private findSendButton(): HTMLElement | null {
+    const selectors = [
+      '.reply-box-send',
+      'button.reply-box-send',
+      '.send-btn',
+      '.reply-btn',
+      '.bili-comment-container button',
+      '.reply-box button',
+      'button[class*="send"]'
+    ];
+
+    const candidates = selectors
+      .flatMap(selector => Array.from(document.querySelectorAll(selector)) as HTMLElement[])
+      .filter((element, index, arr) => arr.indexOf(element) === index)
+      .filter((element) => {
+        const text = `${element.textContent || ''} ${element.getAttribute('aria-label') || ''}`;
+        const disabled = element.getAttribute('disabled') !== null || element.getAttribute('aria-disabled') === 'true';
+        return this.isVisible(element) && !disabled && /发布|发送|评论|回复/i.test(text);
+      });
+
+    return candidates[0] || null;
+  }
+
   extractPosts(): Post[] {
     const posts: Post[] = [];
     // Bilibili 搜索列表页的视频卡片选择器
@@ -122,49 +213,39 @@ export class BilibiliAdapter extends BaseAdapter {
   }
 
   async injectComment(_postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean> {
-    let textarea: HTMLTextAreaElement | null = null;
+    let input: HTMLTextAreaElement | HTMLInputElement | HTMLElement | null = null;
     
-    // 轮询最多 10 次检测，若未渲染则每次滚动并等待 300ms 触发懒加载
-    for (let i = 0; i < 10; i++) {
-      textarea = document.querySelector(
-        'textarea.reply-box-textarea, .reply-textarea, .reply-box-textarea, textarea[placeholder*="发一条"], textarea[placeholder*="评论"], textarea.ipt-txt'
-      ) as HTMLTextAreaElement | null;
+    for (let i = 0; i < 30; i++) {
+      input = this.findCommentInput();
       
-      if (textarea) break;
+      if (input) break;
       
-      // 未发现输入框时，自动轻微向下滚动页面以触发评论区懒加载
-      window.scrollBy(0, 350);
-      await new Promise(resolve => setTimeout(resolve, 300));
+      const commentAnchor = document.querySelector('#comment, .comment, .bili-comment-container, .reply-container') as HTMLElement | null;
+      if (commentAnchor) {
+        commentAnchor.scrollIntoView({ behavior: 'auto', block: 'center' });
+      } else {
+        window.scrollBy(0, 520);
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
     
-    if (!textarea) {
-      console.warn('Bilibili comment input textarea not found after retries.');
-      return false;
+    if (!input) {
+      throw new Error('没有找到 B 站评论输入框，可能是评论区未加载、视频关闭评论或页面结构已变化');
     }
     
-    textarea.focus();
-    const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-    valueSetter?.call(textarea, commentText);
-    if (textarea.value !== commentText) {
-      textarea.value = commentText;
+    if (!this.setCommentInputValue(input, commentText)) {
+      throw new Error('评论框已定位，但页面没有接受输入内容');
     }
     
-    // 触发输入事件，使网页框架能够监听到输入框的变动
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
     
-    // 平滑滚动至评论输入框
-    textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    
-    // 自动发布并关闭页面模式
     if (autoSubmit) {
-      // 延迟 800ms 等待 React 组件将输入内容绑定到组件状态
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
-      // 定位发送按钮
-      const sendButton = document.querySelector(
-        '.reply-box-send, button.reply-box-send, .send-btn, .reply-btn, button[class*="send"]'
-      ) as HTMLElement | null;
+      let sendButton: HTMLElement | null = null;
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        sendButton = this.findSendButton();
+        if (sendButton) break;
+      }
       
       if (sendButton) {
         sendButton.click();
@@ -174,8 +255,7 @@ export class BilibiliAdapter extends BaseAdapter {
           chrome.runtime.sendMessage({ type: 'CLOSE_TAB' });
         }, 2000);
       } else {
-        console.warn('Bilibili send/submit button not found.');
-        return false;
+        throw new Error('评论已填入，但没有找到可点击的发布按钮');
       }
     }
     
