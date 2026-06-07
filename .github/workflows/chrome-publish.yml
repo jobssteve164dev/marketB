@@ -1,0 +1,58 @@
+name: Build and Publish Extension
+
+on:
+  push:
+    tags:
+      - 'v*' # 触发条件：当您推送形如 v1.0.0 的 tag 时自动触发
+  workflow_dispatch: # 支持在 GitHub 页面上点击手动运行工作流，方便调试和日常发布
+
+jobs:
+  build-and-publish:
+    name: Build & Publish to Chrome Web Store
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取代码
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. 设置 Node.js 环境并缓存 npm 依赖
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      # 3. 安装依赖 (使用 npm install 以兼容未锁定版本库的情况)
+      - name: Install Dependencies
+        run: npm install
+
+      # 4. 构建项目
+      - name: Build Extension
+        run: npm run build
+
+      # 5. 将 dist 目录打包为 zip (确保 manifest.json 在 zip 的第一级根目录中)
+      - name: Package Extension
+        run: |
+          cd dist
+          zip -r ../extension.zip ./*
+          cd ..
+
+      # 6. 将打包后的 ZIP 压缩包上传归档，方便在 GitHub Actions 页面直接下载和本地验证调试
+      - name: Archive Production Zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-extension-zip
+          path: extension.zip
+          retention-days: 7 # 临时文件在 GitHub 仅保留 7 天以节约存储空间
+
+      # 7. 上传并发布至 Chrome 商店
+      - name: Upload & Publish to Chrome Web Store
+        uses: fregante/chrome-extension-upload@v2
+        with:
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          extension-id: ${{ secrets.CHROME_APP_ID }}
+          file-path: ./extension.zip
+          publish: true # 设为 true 表示自动提交审核；若只上传更新草稿不自动提审，可修改为 false
