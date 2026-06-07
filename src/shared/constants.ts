@@ -7,28 +7,16 @@ export const PLATFORM_CONFIG: Record<Platform, {
   contentScriptMatches: string[];
   icon: string;
 }> = {
-  twitter: {
-    name: 'Twitter / X',
-    searchUrlPattern: (keyword) => `https://twitter.com/search?q=${encodeURIComponent(keyword)}`,
-    contentScriptMatches: ['*://twitter.com/*', '*://x.com/*'],
-    icon: '𝕏'
-  },
-  xhs: {
-    name: '小红书',
-    searchUrlPattern: (keyword) => `https://www.xiaohongshu.com/search_notes?keyword=${encodeURIComponent(keyword)}`,
-    contentScriptMatches: ['*://xiaohongshu.com/*'],
-    icon: '🔴'
-  },
-  douyin: {
-    name: '抖音',
-    searchUrlPattern: (keyword) => `https://www.douyin.com/search/${encodeURIComponent(keyword)}`,
-    contentScriptMatches: ['*://douyin.com/*'],
-    icon: '✨'
+  bilibili: {
+    name: 'Bilibili',
+    searchUrlPattern: (keyword) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(keyword)}`,
+    contentScriptMatches: ['*://*.bilibili.com/*'],
+    icon: '📺'
   },
   youtube: {
     name: 'YouTube',
     searchUrlPattern: (keyword) => `https://www.youtube.com/results?search_query=${encodeURIComponent(keyword)}`,
-    contentScriptMatches: ['*://youtube.com/*'],
+    contentScriptMatches: ['*://*.youtube.com/*'],
     icon: '▶️'
   }
 };

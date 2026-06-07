@@ -1,5 +1,5 @@
 // 支持的平台
-export type Platform = "twitter" | "xhs" | "douyin" | "youtube";
+export type Platform = "bilibili" | "youtube";
 
 // 帖子/视频数据模型
 export interface Post {

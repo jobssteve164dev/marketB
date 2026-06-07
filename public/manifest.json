@@ -21,7 +21,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://twitter.com/*", "*://x.com/*", "*://xiaohongshu.com/*", "*://douyin.com/*"],
+      "matches": ["*://*.bilibili.com/*", "*://*.youtube.com/*"],
       "js": ["content.js"],
       "run_at": "document_end"
     }
@@ -32,9 +32,7 @@
     "sidePanel"
   ],
   "host_permissions": [
-    "*://twitter.com/*",
-    "*://x.com/*",
-    "*://xiaohongshu.com/*",
-    "*://douyin.com/*"
+    "*://*.bilibili.com/*",
+    "*://*.youtube.com/*"
   ]
 }
