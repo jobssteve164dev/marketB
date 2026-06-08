@@ -40,6 +40,14 @@ const normalizeTargetUrl = (url?: string) => {
       const videoId = parsed.searchParams.get('v');
       return videoId ? `youtube:${videoId}` : `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
     }
+    if (parsed.hostname.includes('twitter.com') || parsed.hostname.includes('x.com')) {
+      const statusId = parsed.pathname.match(/\/status\/(\d+)/)?.[1];
+      return statusId ? `twitter:${statusId}` : `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+    }
+    if (parsed.hostname.includes('facebook.com')) {
+      const fbid = parsed.searchParams.get('story_fbid') || parsed.pathname.match(/\/posts\/(\d+)/)?.[1] || parsed.pathname.match(/\/permalink\/(\d+)/)?.[1];
+      return fbid ? `facebook:${fbid}` : `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+    }
     return `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
   } catch {
     return url.split('#')[0].split('?')[0].replace(/\/$/, '');
@@ -61,7 +69,7 @@ const waitForTabComplete = (tabId: number, timeoutMs = 20000) => {
       if (settled) return;
       settled = true;
       chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error('目标视频页面加载超时'));
+      reject(new Error('目标网页加载超时'));
     }, timeoutMs);
 
     const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
@@ -91,7 +99,7 @@ const runCommentTask = async (task: CommentTask): Promise<CommentTaskResult> => 
     if (tab.status !== 'complete') {
       await waitForTabComplete(tabId).catch(async () => {
         const currentTab = await chrome.tabs.get(tabId!);
-        if (currentTab.status !== 'complete') throw new Error('目标视频页面加载超时');
+        if (currentTab.status !== 'complete') throw new Error('目标网页加载超时');
       });
     }
 
@@ -144,7 +152,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.type === 'RUN_COMMENT_TASKS') {
     const tasks = Array.isArray(message.tasks) ? message.tasks : [];
     if (tasks.length === 0) {
-      sendResponse({ success: false, error: '没有可执行的视频目标' });
+      sendResponse({ success: false, error: '没有可执行的任务目标' });
       return true;
     }
 
@@ -154,7 +162,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
           success: failed.length === 0,
           results,
-          error: failed.length > 0 ? `${failed.length} 个视频处理失败` : undefined
+          error: failed.length > 0 ? `${failed.length} 个任务处理失败` : undefined
         });
       })
       .catch((err: any) => {

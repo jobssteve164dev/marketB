@@ -154,6 +154,10 @@ export default function Sidebar() {
           setCurrentPlatform('bilibili');
         } else if (urlStr.includes('youtube.com')) {
           setCurrentPlatform('youtube');
+        } else if (urlStr.includes('twitter.com') || urlStr.includes('x.com')) {
+          setCurrentPlatform('twitter');
+        } else if (urlStr.includes('facebook.com')) {
+          setCurrentPlatform('facebook');
         } else {
           setCurrentPlatform(null);
         }
@@ -248,7 +252,7 @@ export default function Sidebar() {
   // 4. 从当前页面抓取视频列表
   const handleExtractPosts = () => {
     if (!currentTabId || !currentPlatform) {
-      showToast('请在 Bilibili 或 YouTube 的搜索页面进行抓取', 'error');
+      showToast('请在已适配平台的网页或详情页面进行抓取', 'error');
       return;
     }
 
@@ -409,6 +413,14 @@ export default function Sidebar() {
         const videoId = parsed.searchParams.get('v');
         return videoId ? `youtube:${videoId}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
       }
+      if (parsed.hostname.includes('twitter.com') || parsed.hostname.includes('x.com')) {
+        const statusId = parsed.pathname.match(/\/status\/(\d+)/)?.[1];
+        return statusId ? `twitter:${statusId}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      }
+      if (parsed.hostname.includes('facebook.com')) {
+        const fbid = parsed.searchParams.get('story_fbid') || parsed.pathname.match(/\/posts\/(\d+)/)?.[1] || parsed.pathname.match(/\/permalink\/(\d+)/)?.[1];
+        return fbid ? `facebook:${fbid}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      }
     } catch {
       // 退回到视频 id，避免无效 URL 导致状态丢失。
     }
@@ -533,10 +545,14 @@ export default function Sidebar() {
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border flex items-center gap-1.5 ${
               currentPlatform === 'bilibili' 
                 ? 'bg-sky-500/10 text-sky-400 border-sky-400/20' 
-                : 'bg-red-500/10 text-red-400 border-red-400/20'
+                : currentPlatform === 'youtube'
+                ? 'bg-red-500/10 text-red-400 border-red-400/20'
+                : currentPlatform === 'twitter'
+                ? 'bg-blue-400/10 text-blue-400 border-blue-400/20'
+                : 'bg-indigo-500/10 text-indigo-400 border-indigo-400/20'
             }`}>
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>
-              {currentPlatform === 'bilibili' ? 'Bilibili' : 'YouTube'}
+              {PLATFORM_CONFIG[currentPlatform]?.name || currentPlatform}
             </span>
           ) : (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700/50">
@@ -556,7 +572,7 @@ export default function Sidebar() {
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          🔍 视频发现
+          🔍 内容发现
         </button>
         <button
           onClick={() => setActiveTab('reply')}
@@ -637,12 +653,12 @@ export default function Sidebar() {
                     正在识别网页结构...
                   </>
                 ) : (
-                  <>⚡ 抓取当前页面视频</>
+                  <>⚡ 抓取当前页面内容</>
                 )}
               </button>
               {!currentPlatform && (
                 <p className="text-[10px] text-slate-500 text-center">
-                  *提示：请先在浏览器当前标签页打开 Bilibili 或 YouTube 搜索结果列表再进行抓取。
+                  *提示：请先在浏览器当前标签页打开已适配平台的网页再进行抓取。
                 </p>
               )}
             </div>
@@ -652,7 +668,7 @@ export default function Sidebar() {
               <div className="flex-1 min-h-0 flex flex-col space-y-3 pt-3 border-t border-slate-800/60">
                 <div className="flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-semibold text-slate-400">提取视频 ({filteredPosts.length})</h3>
+                    <h3 className="text-xs font-semibold text-slate-400">提取内容 ({filteredPosts.length})</h3>
                     {selectedPostIds.length > 0 && (
                       <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/10">
                         已选 {selectedPostIds.length} 个
@@ -661,7 +677,7 @@ export default function Sidebar() {
                   </div>
                   <input
                     type="text"
-                    placeholder="过滤视频/UP主..."
+                    placeholder="过滤内容/作者..."
                     value={searchFilter}
                     onChange={(e) => setSearchFilter(e.target.value)}
                     className="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded-lg text-xs w-32 focus:outline-none focus:border-indigo-500/60 transition-colors"
@@ -693,9 +709,15 @@ export default function Sidebar() {
                             className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500/40 focus:ring-offset-0 transition-colors cursor-pointer"
                           />
                           <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                            post.platform === 'bilibili' ? 'bg-sky-500/20 text-sky-400' : 'bg-red-500/20 text-red-400'
+                            post.platform === 'bilibili' 
+                              ? 'bg-sky-500/20 text-sky-400' 
+                              : post.platform === 'youtube'
+                              ? 'bg-red-500/20 text-red-400'
+                              : post.platform === 'twitter'
+                              ? 'bg-blue-400/20 text-blue-400'
+                              : 'bg-indigo-500/20 text-indigo-400'
                           }`}>
-                            {post.platform === 'bilibili' ? 'B站' : 'YT'}
+                            {post.platform === 'bilibili' ? 'B站' : post.platform === 'youtube' ? 'YT' : post.platform === 'twitter' ? 'X' : 'FB'}
                           </span>
                           {getPostActivityLabel(post) && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-500/15 text-amber-300 border border-amber-400/20">
@@ -713,9 +735,21 @@ export default function Sidebar() {
                       
                       <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
                         <div className="flex items-center gap-3">
-                          <span>播放 {formatCompactNum(post.engagement.likes)}</span>
-                          {post.platform === 'bilibili' && (
-                            <span>弹幕 {formatCompactNum(post.engagement.comments)}</span>
+                          {post.platform === 'bilibili' ? (
+                            <>
+                              <span>播放 {formatCompactNum(post.engagement.likes)}</span>
+                              <span>弹幕 {formatCompactNum(post.engagement.comments)}</span>
+                            </>
+                          ) : post.platform === 'youtube' ? (
+                            <>
+                              <span>播放 {formatCompactNum(post.engagement.likes)}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>👍 {formatCompactNum(post.engagement.likes)}</span>
+                              <span>💬 {formatCompactNum(post.engagement.comments)}</span>
+                              <span>🔗 {formatCompactNum(post.engagement.shares)}</span>
+                            </>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
@@ -726,7 +760,7 @@ export default function Sidebar() {
                               openPostPage(post);
                             }}
                             className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                            title="在新窗口中打开此视频"
+                            title="在新窗口中打开此内容"
                           >
                             🔗
                           </button>
@@ -738,7 +772,7 @@ export default function Sidebar() {
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center border-t border-slate-800/60 text-slate-500 text-xs">
-                暂无抓取数据，请先抓取视频
+                暂无抓取数据，请先抓取页面内容
               </div>
             )}
           </div>
@@ -756,9 +790,15 @@ export default function Sidebar() {
                     <div key={post.id} className="flex items-center justify-between text-xs text-slate-300 bg-slate-950/40 p-1.5 rounded border border-slate-900/80">
                       <div className="flex items-center gap-1.5 truncate flex-1 mr-2">
                         <span className={`text-[9px] px-1 py-0.2 rounded font-semibold ${
-                          post.platform === 'bilibili' ? 'bg-sky-500/20 text-sky-400' : 'bg-red-500/20 text-red-400'
+                          post.platform === 'bilibili' 
+                            ? 'bg-sky-500/20 text-sky-400' 
+                            : post.platform === 'youtube'
+                            ? 'bg-red-500/20 text-red-400'
+                            : post.platform === 'twitter'
+                            ? 'bg-blue-400/20 text-blue-400'
+                            : 'bg-indigo-500/20 text-indigo-400'
                         }`}>
-                          {post.platform === 'bilibili' ? 'B站' : 'YT'}
+                          {post.platform === 'bilibili' ? 'B站' : post.platform === 'youtube' ? 'YT' : post.platform === 'twitter' ? 'X' : 'FB'}
                         </span>
                         <span className="truncate italic">"{post.content}"</span>
                       </div>
@@ -774,7 +814,7 @@ export default function Sidebar() {
                 </div>
               ) : (
                 <p className="text-xs text-slate-500">
-                  ⚠️ 您还没有在“视频发现”中勾选任何视频。请先勾选视频以开启一键批量填充。
+                  ⚠️ 您还没有在“内容发现”中勾选任何内容。请先勾选目标以开启一键批量填充。
                 </p>
               )}
             </div>
@@ -949,10 +989,36 @@ export default function Sidebar() {
               </div>
             </div>
             
+            {/* 快捷访问已适配平台 */}
+            <div className="space-y-2 shrink-0">
+              <h3 className="text-xs font-semibold text-slate-400">快捷访问已适配平台</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(PLATFORM_CONFIG).map(([key, config]) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      if (typeof chrome !== 'undefined' && chrome.tabs) {
+                        chrome.tabs.create({ url: config.baseUrl });
+                      } else {
+                        window.open(config.baseUrl, '_blank');
+                      }
+                    }}
+                    className="flex items-center gap-2.5 p-2.5 bg-slate-900/60 hover:bg-indigo-950/20 border border-slate-800/80 hover:border-indigo-500/40 rounded-xl text-left transition-all duration-200 hover:scale-[1.02] active:scale-95 group"
+                  >
+                    <span className="text-lg group-hover:scale-110 transition-transform duration-200">{config.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-slate-200 group-hover:text-indigo-400 transition-colors truncate">{config.name}</p>
+                      <p className="text-[9px] text-slate-500 truncate">{config.baseUrl.replace('https://', '')}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* 项目申明 */}
             <div className="p-3 bg-indigo-950/10 border border-indigo-500/10 rounded-xl text-[10px] text-slate-500 leading-relaxed shrink-0">
               <p className="font-semibold text-slate-400 mb-1">🔒 安全性与合规声明：</p>
-              <p>本插件所有数据（包括检索词、回复文本及分析缓存）均安全保存在您的本地浏览器中，绝不上报或泄露。勾选自动发布后，插件会在后台打开目标视频、填充评论并发送；关闭自动发布时，只填充内容并等待您手动确认。</p>
+              <p>本插件所有数据（包括检索词、回复文本及分析缓存）均安全保存在您的本地浏览器中，绝不上报或泄露。勾选自动发布后，插件会在后台打开目标网页、填充回复并发送；关闭自动发布时，只填充内容并等待您手动确认。</p>
             </div>
           </div>
         )}

@@ -6,18 +6,35 @@ export const PLATFORM_CONFIG: Record<Platform, {
   searchUrlPattern: (keyword: string) => string;
   contentScriptMatches: string[];
   icon: string;
+  baseUrl: string;
 }> = {
   bilibili: {
     name: 'Bilibili',
     searchUrlPattern: (keyword) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(keyword)}`,
     contentScriptMatches: ['*://*.bilibili.com/*'],
-    icon: '📺'
+    icon: '📺',
+    baseUrl: 'https://www.bilibili.com'
   },
   youtube: {
     name: 'YouTube',
     searchUrlPattern: (keyword) => `https://www.youtube.com/results?search_query=${encodeURIComponent(keyword)}`,
     contentScriptMatches: ['*://*.youtube.com/*'],
-    icon: '▶️'
+    icon: '▶️',
+    baseUrl: 'https://www.youtube.com'
+  },
+  twitter: {
+    name: 'X (Twitter)',
+    searchUrlPattern: (keyword) => `https://x.com/search?q=${encodeURIComponent(keyword)}&src=typed_query`,
+    contentScriptMatches: ['*://*.twitter.com/*', '*://*.x.com/*'],
+    icon: '𝕏',
+    baseUrl: 'https://x.com'
+  },
+  facebook: {
+    name: 'Facebook',
+    searchUrlPattern: (keyword) => `https://www.facebook.com/search/top?q=${encodeURIComponent(keyword)}`,
+    contentScriptMatches: ['*://*.facebook.com/*'],
+    icon: '👥',
+    baseUrl: 'https://www.facebook.com'
   }
 };
 

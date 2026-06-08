@@ -21,7 +21,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.bilibili.com/*", "*://*.youtube.com/*"],
+      "matches": [
+        "*://*.bilibili.com/*",
+        "*://*.youtube.com/*",
+        "*://*.twitter.com/*",
+        "*://*.x.com/*",
+        "*://*.facebook.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_end"
     }
@@ -34,6 +40,9 @@
   ],
   "host_permissions": [
     "*://*.bilibili.com/*",
-    "*://*.youtube.com/*"
+    "*://*.youtube.com/*",
+    "*://*.twitter.com/*",
+    "*://*.x.com/*",
+    "*://*.facebook.com/*"
   ]
 }

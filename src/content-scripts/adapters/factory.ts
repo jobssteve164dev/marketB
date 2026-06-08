@@ -1,5 +1,7 @@
 import { BilibiliAdapter } from './bilibili.js';
 import { YoutubeAdapter } from './youtube.js';
+import { TwitterAdapter } from './twitter.js';
+import { FacebookAdapter } from './facebook.js';
 import type { BaseAdapter } from './base.js';
 
 /**
@@ -13,6 +15,12 @@ export function getAdapterForCurrentPage(): BaseAdapter | null {
   }
   if (host.includes('youtube.com')) {
     return new YoutubeAdapter();
+  }
+  if (host.includes('twitter.com') || host.includes('x.com')) {
+    return new TwitterAdapter();
+  }
+  if (host.includes('facebook.com')) {
+    return new FacebookAdapter();
   }
   
   return null;
