@@ -45,6 +45,9 @@
     "*://*.youtube.com/*",
     "*://*.twitter.com/*",
     "*://*.x.com/*",
-    "*://*.facebook.com/*"
+    "*://*.facebook.com/*",
+    "*://localhost/*",
+    "*://seevoid.com/*",
+    "*://*.seevoid.com/*"
   ]
 }
