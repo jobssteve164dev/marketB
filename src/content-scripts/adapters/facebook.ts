@@ -10,9 +10,32 @@ export class FacebookAdapter extends BaseAdapter {
 
     cards.forEach((card, index) => {
       try {
-        // 1. 查找文本内容
-        const textEl = card.querySelector('[data-ad-preview="message"], [data-ad-comet-preview="message"]') as HTMLElement | null;
-        const content = textEl ? (textEl.textContent || '').trim() : '';
+        // 1. 查找文本内容 (增加 Fallback 并适配普通图文帖子)
+        const textSelectors = [
+          '[data-ad-preview="message"]',
+          '[data-ad-comet-preview="message"]',
+          '[data-ad-rendering-role="story_message"]',
+          'div[dir="auto"]'
+        ];
+        
+        let content = '';
+        for (const selector of textSelectors) {
+          const elements = card.querySelectorAll(selector);
+          for (const el of Array.from(elements)) {
+            // 排除包含在链接、strong、标题中的作者或元数据信息
+            if (el.closest('a') || el.closest('strong') || el.closest('h3') || el.closest('h2') || el.closest('[role="link"]')) {
+              continue;
+            }
+            const txt = (el.textContent || '').trim();
+            // 排除常见的操作按钮文本与单字元数据
+            if (txt && txt.length > 2 && !/^(?:赞|回复|分享|评论|Like|Reply|Share|Comment)$/i.test(txt)) {
+              content = txt;
+              break;
+            }
+          }
+          if (content) break;
+        }
+        
         if (!content) return; // 过滤无文本帖子
 
         // 2. 查找帖子详情链接和 ID
