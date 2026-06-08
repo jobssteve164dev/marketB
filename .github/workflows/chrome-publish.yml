@@ -59,6 +59,7 @@ jobs:
       # 6. 将编译产物 dist 压缩为 zip
       - name: Package Extension
         run: |
+          rm -f extension.zip
           cd dist
           zip -r ../extension.zip ./*
           cd ..
