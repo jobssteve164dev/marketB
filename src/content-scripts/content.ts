@@ -19,6 +19,18 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
     } catch (err: any) {
       sendResponse({ success: false, error: err.message || 'Error occurred while extracting posts.' });
     }
+  } else if (message.type === 'EXTRACT_AND_SCROLL') {
+    try {
+      const posts = adapter.extractPosts();
+      // 触发滚动，以便下一次提取能够获得新视频
+      window.scrollBy({
+        top: window.innerHeight * 1.5,
+        behavior: 'smooth'
+      });
+      sendResponse({ success: true, posts });
+    } catch (err: any) {
+      sendResponse({ success: false, error: err.message || 'Error occurred while extracting posts.' });
+    }
   } else if (message.type === 'INJECT_COMMENT') {
     const { postId, commentText, autoSubmit } = message;
     // 异步执行评论填充

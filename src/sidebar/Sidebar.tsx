@@ -30,6 +30,8 @@ export default function Sidebar() {
   const [searchFilter, setSearchFilter] = useState('');
   const [postActivity, setPostActivity] = useState<PostActivityMap>({});
   const [filterHandledPosts, setFilterHandledPosts] = useState(true); // 跨话题过滤已回复视频
+  const [isAutoScrolling, setIsAutoScrolling] = useState(false); // 是否处于自动滚屏抓取中
+  const autoScrollIntervalRef = React.useRef<any>(null);
   
   // 评论回复编辑
   const [replyText, setReplyText] = useState('');
@@ -273,15 +275,88 @@ export default function Sidebar() {
       }
 
       if (response && response.success && response.posts) {
-        setPosts(response.posts);
+        setPosts(prevPosts => {
+          const combined = [...prevPosts, ...response.posts];
+          const seen = new Set<string>();
+          return combined.filter(post => {
+            if (!post.id || seen.has(post.id)) return false;
+            seen.add(post.id);
+            return true;
+          }).sort((a, b) => b.heatScore - a.heatScore);
+        });
         setSelectedPostIds([]); // 重置选中的复选框
         setSelectedPost(null);
-        showToast(`成功提取到 ${response.posts.length} 个视频！`, 'success');
+        showToast(`成功提取到 ${response.posts.length} 个视频并合并至列表！`, 'success');
       } else {
         showToast(response?.error || '页面中未发现支持格式的视频卡片', 'error');
       }
     });
   };
+
+  // 清空视频列表
+  const handleClearPosts = () => {
+    setPosts([]);
+    setSelectedPostIds([]);
+    setSelectedPost(null);
+    showToast('已清空抓取列表', 'info');
+  };
+
+  // 自动滚屏抓取核心触发器
+  const triggerExtractAndScroll = () => {
+    if (!currentTabId) return;
+    chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_AND_SCROLL' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error(chrome.runtime.lastError);
+        return;
+      }
+      if (response && response.success && response.posts) {
+        setPosts(prevPosts => {
+          const combined = [...prevPosts, ...response.posts];
+          const seen = new Set<string>();
+          return combined.filter(post => {
+            if (!post.id || seen.has(post.id)) return false;
+            seen.add(post.id);
+            return true;
+          }).sort((a, b) => b.heatScore - a.heatScore);
+        });
+      }
+    });
+  };
+
+  // 开关自动滚动抓取
+  const handleToggleAutoScroll = () => {
+    if (isAutoScrolling) {
+      if (autoScrollIntervalRef.current) {
+        clearInterval(autoScrollIntervalRef.current);
+        autoScrollIntervalRef.current = null;
+      }
+      setIsAutoScrolling(false);
+      showToast('已停止自动滚动抓取', 'info');
+    } else {
+      if (!currentTabId || !currentPlatform) {
+        showToast('请在已适配平台的网页进行抓取', 'error');
+        return;
+      }
+      setIsAutoScrolling(true);
+      showToast('开启自动滚动抓取，页面正在自动翻页...', 'success');
+      
+      // 立即抓取一次
+      triggerExtractAndScroll();
+      
+      autoScrollIntervalRef.current = setInterval(() => {
+        triggerExtractAndScroll();
+      }, 2000);
+    }
+  };
+
+  // 组件卸载时确保清除定时器
+  useEffect(() => {
+    return () => {
+      if (autoScrollIntervalRef.current) {
+        clearInterval(autoScrollIntervalRef.current);
+      }
+    };
+  }, []);
 
   const runBackgroundCommentTasks = (targetPosts: Post[]) => {
     if (targetPosts.length === 0) {
@@ -684,23 +759,40 @@ export default function Sidebar() {
 
             {/* 抓取操作 */}
             <div className="flex flex-col gap-2 shrink-0">
-              <button
-                onClick={handleExtractPosts}
-                disabled={isLoadingPosts}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
-              >
-                {isLoadingPosts ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-3 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    正在识别网页结构...
-                  </>
-                ) : (
-                  <>⚡ 抓取当前页面内容</>
-                )}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleExtractPosts}
+                  disabled={isLoadingPosts || isAutoScrolling}
+                  className="flex-1 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1.5 text-xs"
+                  title="单次提取当前可见页面中的视频帖子数据"
+                >
+                  {isLoadingPosts ? '正在抓取...' : '⚡ 单次抓取'}
+                </button>
+                
+                <button
+                  onClick={handleToggleAutoScroll}
+                  disabled={isLoadingPosts}
+                  className={`flex-1 py-2 rounded-xl font-semibold transition-all duration-200 shadow-md hover:scale-[1.01] active:scale-95 text-xs flex items-center justify-center gap-1.5 ${
+                    isAutoScrolling 
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/10 animate-pulse' 
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 shadow-slate-800/10'
+                  }`}
+                  title="开启后插件将自动滚屏，定时向下翻页并持续抓取帖子，解决滚动导致的元素回收和漏抓问题"
+                >
+                  {isAutoScrolling ? '🛑 停止自动抓取' : '🔄 自动滚动抓取'}
+                </button>
+              </div>
+              
+              {posts.length > 0 && (
+                <button
+                  onClick={handleClearPosts}
+                  disabled={isAutoScrolling}
+                  className="w-full py-1.5 rounded-lg border border-slate-800 bg-slate-950/40 hover:bg-slate-900/60 hover:border-slate-700/60 text-slate-400 hover:text-slate-200 transition-all text-[11px] flex items-center justify-center gap-1 active:scale-98 disabled:opacity-40"
+                >
+                  🧹 清空列表已抓取的视频 ({posts.length} 个)
+                </button>
+              )}
+
               {!currentPlatform && (
                 <p className="text-[10px] text-slate-500 text-center">
                   *提示：请先在浏览器当前标签页打开已适配平台的网页再进行抓取。

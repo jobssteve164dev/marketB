@@ -53,6 +53,7 @@ export interface ReplyDraft {
 // 消息类型 (Background <-> Content Script <-> Sidebar)
 export type MessageType =
   | "SEARCH_POSTS"
+  | "EXTRACT_AND_SCROLL"
   | "POSTS_PARSED"
   | "INJECT_COMMENT"
   | "RUN_COMMENT_TASKS"
