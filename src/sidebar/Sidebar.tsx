@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import type { Post, Keyword, Memo, Platform, YinliProduct, YinliSignal } from '../shared/types.js';
 import { PLATFORM_CONFIG, DEFAULT_MEMO_TEMPLATES } from '../shared/constants.js';
 
+const DEFAULT_YINLI_URL = (import.meta as any).env?.VITE_YINLI_API_URL || 
+  ((import.meta as any).env?.DEV ? 'http://localhost:3000' : 'https://seevoid.com');
+
 type PostActivity = {
   viewedAt?: number;
   openedAt?: number;
@@ -35,7 +38,7 @@ export default function Sidebar() {
   
   // 隐力 YL 协同模式状态
   const [activeMode, setActiveMode] = useState<'local' | 'yinli'>('local');
-  const [yinliApiUrl, setYinliApiUrl] = useState('http://localhost:3000');
+  const [yinliApiUrl, setYinliApiUrl] = useState(DEFAULT_YINLI_URL);
   const [yinliToken, setYinliToken] = useState('');
   const [yinliUser, setYinliUser] = useState<any>(null);
   const [yinliProducts, setYinliProducts] = useState<YinliProduct[]>([]);
@@ -1055,7 +1058,7 @@ export default function Sidebar() {
                       <label className="text-[10px] text-slate-400 block mb-1">YL 服务端地址 (API URL)</label>
                       <input
                         type="text"
-                        placeholder="默认: http://localhost:3000"
+                        placeholder={`默认: ${DEFAULT_YINLI_URL}`}
                         value={yinliApiUrl}
                         onChange={(e) => setYinliApiUrl(e.target.value.trim())}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
@@ -1852,7 +1855,7 @@ export default function Sidebar() {
                   <label className="text-[10px] text-slate-400 block mb-1">YL API Endpoint (服务端地址)</label>
                   <input
                     type="text"
-                    placeholder="默认: http://localhost:3000"
+                    placeholder={`默认: ${DEFAULT_YINLI_URL}`}
                     value={yinliApiUrl}
                     onChange={(e) => {
                       const val = e.target.value.trim();
