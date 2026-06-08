@@ -41,12 +41,32 @@ jobs:
           node-version: 18
           cache: 'npm'
 
-      # 3. 读取 package.json 中的版本号
-      - name: Extract Project Version
+      # 3. 自动递增版本号并回写至仓库
+      - name: Auto Bump Version
         id: get_version
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 递增 package.json 中的 patch 版本号
+          npm version patch --no-git-tag-version
+          
           VERSION="v$(node -p "require('./package.json').version")"
+          VERSION_RAW="$(node -p "require('./package.json').version")"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # 同步更新 public/manifest.json 中的版本号
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('public/manifest.json', 'utf8'));
+            manifest.version = '$VERSION_RAW';
+            fs.writeFileSync('public/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+          "
+          
+          # 提交更改回写到 main 分支，带 [skip ci] 防止重新触发构建
+          git add package.json public/manifest.json
+          git commit -m "chore(release): bump version to $VERSION [skip ci]"
+          git push origin HEAD:main
 
       # 4. 安装依赖
       - name: Install Dependencies
