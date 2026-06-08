@@ -60,8 +60,11 @@ export class TwitterAdapter extends BaseAdapter {
       }
     });
 
+    // 对帖子进行去重
+    const uniquePosts = this.filterUniquePosts(posts);
+
     // 按热度降序排序
-    return posts.sort((a, b) => b.heatScore - a.heatScore);
+    return uniquePosts.sort((a, b) => b.heatScore - a.heatScore);
   }
 
   private parseInteractionNumber(text: string): number {

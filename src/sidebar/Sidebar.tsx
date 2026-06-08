@@ -29,6 +29,7 @@ export default function Sidebar() {
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [postActivity, setPostActivity] = useState<PostActivityMap>({});
+  const [filterHandledPosts, setFilterHandledPosts] = useState(true); // 跨话题过滤已回复视频
   
   // 评论回复编辑
   const [replyText, setReplyText] = useState('');
@@ -52,9 +53,13 @@ export default function Sidebar() {
   useEffect(() => {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
       // 获取已存的关键词和备忘录模板
-      chrome.storage.local.get(['keywords', 'memos', 'postActivity'], (result) => {
+      chrome.storage.local.get(['keywords', 'memos', 'postActivity', 'filterHandledPosts'], (result) => {
         if (result.postActivity) {
           setPostActivity(result.postActivity as PostActivityMap);
+        }
+
+        if (result.filterHandledPosts !== undefined) {
+          setFilterHandledPosts(result.filterHandledPosts);
         }
 
         if (result.keywords) {
@@ -287,18 +292,35 @@ export default function Sidebar() {
       showToast('请编写回复评论的内容', 'error');
       return;
     }
+
+    // 跨话题防止重复评论机制：根据 postActivity 的 handledAt 自动过滤已操作过的视频
+    const unhandledPosts = targetPosts.filter(post => {
+      const key = getPostActivityKey(post);
+      return !postActivity[key]?.handledAt;
+    });
+
+    if (unhandledPosts.length === 0) {
+      showToast('所选视频已在此前话题的评论操作中回复过，已自动拦截重复评论', 'info');
+      return;
+    }
+
+    const skippedCount = targetPosts.length - unhandledPosts.length;
+    if (skippedCount > 0) {
+      showToast(`已自动跳过 ${skippedCount} 个已回复视频，仅对剩下的 ${unhandledPosts.length} 个进行评论`, 'info');
+    }
+
     if (typeof chrome === 'undefined' || !chrome.runtime) {
       showToast('当前环境不支持后台自动任务', 'error');
       return;
     }
 
     setIsInjecting(true);
-    targetPosts.forEach(post => markPostActivity(post, 'openedAt'));
-    showToast(`后台正在处理 ${targetPosts.length} 个视频...`, 'info');
+    unhandledPosts.forEach(post => markPostActivity(post, 'openedAt'));
+    showToast(`后台正在处理 ${unhandledPosts.length} 个视频...`, 'info');
 
     chrome.runtime.sendMessage({
       type: 'RUN_COMMENT_TASKS',
-      tasks: targetPosts.map(post => ({
+      tasks: unhandledPosts.map(post => ({
         id: post.id,
         pageUrl: post.pageUrl,
         commentText: replyText,
@@ -312,11 +334,11 @@ export default function Sidebar() {
       }
 
       if (response?.success) {
-        targetPosts.forEach(post => markPostActivity(post, 'handledAt'));
+        unhandledPosts.forEach(post => markPostActivity(post, 'handledAt'));
         showToast(
           autoSubmit 
-            ? `已完成 ${targetPosts.length} 个视频的后台填充和发送。` 
-            : `已完成 ${targetPosts.length} 个视频的后台填充，请在打开的页面确认发送。`, 
+            ? `已完成 ${unhandledPosts.length} 个视频的后台填充和发送。` 
+            : `已完成 ${unhandledPosts.length} 个视频的后台填充，请在打开的页面确认发送。`, 
           'success'
         );
       } else {
@@ -326,10 +348,10 @@ export default function Sidebar() {
             .filter((result: { id: string; success: boolean }) => result.success)
             .map((result: { id: string }) => result.id)
         );
-        targetPosts
+        unhandledPosts
           .filter(post => completedIds.has(post.id))
           .forEach(post => markPostActivity(post, 'handledAt'));
-        const failedCount = results.filter((result: { success: boolean }) => !result.success).length || targetPosts.length;
+        const failedCount = results.filter((result: { success: boolean }) => !result.success).length || unhandledPosts.length;
         const firstError = results.find((result: { success: boolean; error?: string }) => !result.success)?.error;
         showToast(firstError || `${failedCount} 个视频未完成，评论区或发送按钮不可用`, 'error');
       }
@@ -405,21 +427,36 @@ export default function Sidebar() {
   const getUrlActivityKey = (platform: Platform, pageUrl?: string, fallbackId = '') => {
     try {
       const parsed = new URL(pageUrl || '');
-      if (parsed.hostname.includes('bilibili.com')) {
-        const bvid = parsed.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/)?.[1];
-        return bvid ? `bilibili:${bvid}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      const hostname = parsed.hostname;
+      const pathname = parsed.pathname;
+
+      if (hostname.includes('bilibili.com')) {
+        const bvid = pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/)?.[1];
+        return bvid ? `bilibili:${bvid}` : `bilibili:${fallbackId || pathname}`;
       }
-      if (parsed.hostname.includes('youtube.com')) {
-        const videoId = parsed.searchParams.get('v');
-        return videoId ? `youtube:${videoId}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      
+      if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+        let videoId = parsed.searchParams.get('v');
+        if (!videoId) {
+          const shortsMatch = pathname.match(/\/shorts\/([^&#/?]+)/);
+          if (shortsMatch) {
+            videoId = shortsMatch[1];
+          } else if (hostname.includes('youtu.be')) {
+            const pathMatch = pathname.match(/^\/([^&#/?]+)/);
+            if (pathMatch) videoId = pathMatch[1];
+          }
+        }
+        return videoId ? `youtube:${videoId}` : `youtube:${fallbackId || pathname}`;
       }
-      if (parsed.hostname.includes('twitter.com') || parsed.hostname.includes('x.com')) {
-        const statusId = parsed.pathname.match(/\/status\/(\d+)/)?.[1];
-        return statusId ? `twitter:${statusId}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      
+      if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+        const statusId = pathname.match(/\/status\/(\d+)/)?.[1];
+        return statusId ? `twitter:${statusId}` : `twitter:${fallbackId || pathname}`;
       }
-      if (parsed.hostname.includes('facebook.com')) {
-        const fbid = parsed.searchParams.get('story_fbid') || parsed.pathname.match(/\/posts\/(\d+)/)?.[1] || parsed.pathname.match(/\/permalink\/(\d+)/)?.[1];
-        return fbid ? `facebook:${fbid}` : `${platform}:${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+      
+      if (hostname.includes('facebook.com')) {
+        const fbid = parsed.searchParams.get('story_fbid') || parsed.searchParams.get('fbid') || pathname.match(/\/posts\/(\d+)/)?.[1] || pathname.match(/\/permalink\/(\d+)/)?.[1] || pathname.match(/\/videos\/(\d+)/)?.[1];
+        return fbid ? `facebook:${fbid}` : `facebook:${fallbackId || pathname}`;
       }
     } catch {
       // 退回到视频 id，避免无效 URL 导致状态丢失。
@@ -485,10 +522,18 @@ export default function Sidebar() {
   };
 
   // 过滤视频列表
-  const filteredPosts = posts.filter(p => 
-    p.content.toLowerCase().includes(searchFilter.toLowerCase()) ||
-    p.author.toLowerCase().includes(searchFilter.toLowerCase())
-  );
+  const filteredPosts = posts.filter(p => {
+    if (filterHandledPosts) {
+      const activity = postActivity[getPostActivityKey(p)];
+      if (activity?.handledAt) {
+        return false;
+      }
+    }
+    return (
+      p.content.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      p.author.toLowerCase().includes(searchFilter.toLowerCase())
+    );
+  });
 
   // 单选/多选卡片交互
   const handleSelectCard = (post: Post) => {
@@ -666,22 +711,41 @@ export default function Sidebar() {
             {/* 抓取结果展示 - 实现 Flex 填充与独立滚动以去除留白 */}
             {posts.length > 0 ? (
               <div className="flex-1 min-h-0 flex flex-col space-y-3 pt-3 border-t border-slate-800/60">
-                <div className="flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-semibold text-slate-400">提取内容 ({filteredPosts.length})</h3>
-                    {selectedPostIds.length > 0 && (
-                      <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/10">
-                        已选 {selectedPostIds.length} 个
-                      </span>
-                    )}
+                <div className="flex flex-col gap-2 shrink-0">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xs font-semibold text-slate-400">提取内容 ({filteredPosts.length})</h3>
+                      {selectedPostIds.length > 0 && (
+                        <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/10">
+                          已选 {selectedPostIds.length} 个
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="过滤内容/作者..."
+                      value={searchFilter}
+                      onChange={(e) => setSearchFilter(e.target.value)}
+                      className="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded-lg text-xs w-32 focus:outline-none focus:border-indigo-500/60 transition-colors"
+                    />
                   </div>
-                  <input
-                    type="text"
-                    placeholder="过滤内容/作者..."
-                    value={searchFilter}
-                    onChange={(e) => setSearchFilter(e.target.value)}
-                    className="px-2 py-0.5 bg-slate-900 border border-slate-800 rounded-lg text-xs w-32 focus:outline-none focus:border-indigo-500/60 transition-colors"
-                  />
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-200 cursor-pointer transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={filterHandledPosts}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setFilterHandledPosts(val);
+                          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                            chrome.storage.local.set({ filterHandledPosts: val });
+                          }
+                        }}
+                        className="w-3 h-3 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500/40 focus:ring-offset-0 transition-colors cursor-pointer"
+                      />
+                      <span>跨话题过滤已回复 (排除已评论视频)</span>
+                    </label>
+                  </div>
                 </div>
 
                 {/* 滚动卡片列表，无高度限制，完美自适应 */}

@@ -321,8 +321,11 @@ export class BilibiliAdapter extends BaseAdapter {
       }
     });
     
+    // 对帖子进行去重
+    const uniquePosts = this.filterUniquePosts(posts);
+
     // 按热度得分从高到低排序
-    return posts.sort((a, b) => b.heatScore - a.heatScore);
+    return uniquePosts.sort((a, b) => b.heatScore - a.heatScore);
   }
 
   async injectComment(_postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean> {

@@ -16,11 +16,22 @@ export class YoutubeAdapter extends BaseAdapter {
         if (!titleLink) return;
         
         const pageUrl = titleLink.href;
-        if (!pageUrl || !pageUrl.includes('/watch?v=')) return;
+        if (!pageUrl || (!pageUrl.includes('/watch?v=') && !pageUrl.includes('/shorts/') && !pageUrl.includes('youtu.be/'))) return;
         
-        // 提取视频 ID
+        // 提取视频 ID（支持普通 watch 链接、shorts 链接以及短链接 youtu.be）
+        let id = '';
         const videoIdMatch = pageUrl.match(/[?&]v=([^&#]+)/);
-        const id = videoIdMatch ? videoIdMatch[1] : `yt-${index}-${Date.now()}`;
+        if (videoIdMatch) {
+          id = videoIdMatch[1];
+        } else {
+          const shortsMatch = pageUrl.match(/\/shorts\/([^&#/?]+)/);
+          if (shortsMatch) {
+            id = shortsMatch[1];
+          } else {
+            const youtuBeMatch = pageUrl.match(/youtu\.be\/([^&#/?]+)/);
+            id = youtuBeMatch ? youtuBeMatch[1] : `yt-${index}-${Date.now()}`;
+          }
+        }
         
         // 提取标题内容
         const content = (titleLink.textContent || titleLink.title || '').trim();
@@ -65,8 +76,11 @@ export class YoutubeAdapter extends BaseAdapter {
       }
     });
     
+    // 对帖子进行去重
+    const uniquePosts = this.filterUniquePosts(posts);
+
     // 按播放量热度降序排序
-    return posts.sort((a, b) => b.heatScore - a.heatScore);
+    return uniquePosts.sort((a, b) => b.heatScore - a.heatScore);
   }
 
   async injectComment(_postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean> {

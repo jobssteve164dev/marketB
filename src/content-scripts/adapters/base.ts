@@ -39,4 +39,16 @@ export abstract class BaseAdapter {
     const val = parseFloat(clean);
     return isNaN(val) ? 0 : val;
   }
+
+  // 根据帖子 ID 过滤去重
+  protected filterUniquePosts(posts: Post[]): Post[] {
+    const seen = new Set<string>();
+    return posts.filter(post => {
+      if (!post.id || seen.has(post.id)) {
+        return false;
+      }
+      seen.add(post.id);
+      return true;
+    });
+  }
 }

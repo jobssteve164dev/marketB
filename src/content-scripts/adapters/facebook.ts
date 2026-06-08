@@ -94,7 +94,10 @@ export class FacebookAdapter extends BaseAdapter {
       }
     });
 
-    return posts.sort((a, b) => b.heatScore - a.heatScore);
+    // 对帖子进行去重
+    const uniquePosts = this.filterUniquePosts(posts);
+
+    return uniquePosts.sort((a, b) => b.heatScore - a.heatScore);
   }
 
   private parseInteractionNumber(text: string): number {
