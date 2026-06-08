@@ -91,7 +91,7 @@ jobs:
       # 9. 上传并发布至 Chrome Web Store
       - name: Upload & Publish to Chrome Web Store
         run: |
-          npx chrome-webstore-upload-cli --source ./extension.zip
+          npx chrome-webstore-upload-cli upload --source ./extension.zip
         env:
           CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
