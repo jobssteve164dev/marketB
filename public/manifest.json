@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Marketing Sidebar",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "自动化营销助手：跨平台搜索、热度排序、快速回复",
   "icons": {
     "16": "icons/icon-16.png",
