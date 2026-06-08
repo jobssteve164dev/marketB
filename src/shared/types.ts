@@ -71,3 +71,45 @@ export interface Message {
   type: MessageType;
   [key: string]: any;
 }
+
+// Yinli 隐力集成接口模型
+export interface YinliProduct {
+  id: string;
+  name: string;
+  url: string | null;
+  description: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface YinliStrategy {
+  id: number;
+  signalId: number;
+  type: string; // EMPATH, EXPERT, PLUG
+  content: string;
+  reasoning: string;
+  createdAt: string;
+  approvedForSniping?: boolean;
+}
+
+export interface YinliSignal {
+  id: number;
+  userId: string;
+  productId: string | null;
+  battlefieldId: string | null;
+  source: string;
+  url: string;
+  title: string;
+  textContent: string;
+  author: string | null;
+  publishedAt: string | null;
+  scoutedAt: string;
+  status: string; // NEW, IGNORED, APPROVED, POSTED
+  qualityScore: number | null;
+  strategies: YinliStrategy[];
+  battlefield?: {
+    id: string;
+    name: string;
+    url: string;
+  };
+}
