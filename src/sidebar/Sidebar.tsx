@@ -44,8 +44,7 @@ export default function Sidebar() {
   const [selectedYinliSignal, setSelectedYinliSignal] = useState<YinliSignal | null>(null);
   
   // 登录表单
-  const [yinliEmail, setYinliEmail] = useState('');
-  const [yinliPassword, setYinliPassword] = useState('');
+  const [yinliApiKey, setYinliApiKey] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoadingSignals, setIsLoadingSignals] = useState(false);
   
@@ -402,46 +401,50 @@ export default function Sidebar() {
 
   // ==================== 隐力 YL 协同模块接口逻辑 ====================
 
-  // 1. 隐力账号登录
+  // 1. 隐力 API Key 绑定
   const handleYinliLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!yinliEmail.trim() || !yinliPassword.trim()) {
-      showToast('请输入邮箱和密码', 'error');
+    if (!yinliApiKey.trim()) {
+      showToast('请输入隐力 API Key', 'error');
       return;
     }
 
     setIsLoggingIn(true);
+    const targetKey = yinliApiKey.trim();
     try {
-      const res = await fetch(`${yinliApiUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: yinliEmail, password: yinliPassword }),
+      // 通过 /api/auth/me 进行 API Key 的有效性验证，传入 Authorization: Bearer <API_KEY>
+      const res = await fetch(`${yinliApiUrl}/api/auth/me`, {
+        method: 'GET',
+        headers: { 
+          'Authorization': `Bearer ${targetKey}`,
+          'Accept': 'application/json'
+        },
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || '登录失败，请检查密码或网络');
+        throw new Error(data.error || '验证失败，请检查 API Key 或服务端连接');
       }
 
-      setYinliToken(data.token);
+      // 验证成功后，将 API Key 存为 Token
+      setYinliToken(targetKey);
       setYinliUser(data.user);
       
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         chrome.storage.local.set({
-          yinliToken: data.token,
+          yinliToken: targetKey,
           yinliUser: data.user,
         });
       }
 
-      showToast('隐力协同系统登录成功！', 'success');
-      setYinliEmail('');
-      setYinliPassword('');
+      showToast('隐力 API Key 绑定成功！', 'success');
+      setYinliApiKey('');
       
-      // 登录成功后直接拉取产品
-      fetchYinliProducts(data.token);
+      // 绑定成功后拉取产品列表
+      fetchYinliProducts(targetKey);
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || '网络连接异常，请确保 YL 服务运行中', 'error');
+      showToast(err.message || '连接异常，请确保 YL 协同服务运行中', 'error');
     } finally {
       setIsLoggingIn(false);
     }
@@ -1040,7 +1043,7 @@ export default function Sidebar() {
           activeMode === 'yinli' ? (
             // ================= 隐力模式分流 =================
             !yinliToken ? (
-              // 1. 未登录登录面板
+              // 1. 未登录绑定面板
               <form onSubmit={handleYinliLogin} className="flex flex-col space-y-4 justify-center py-6">
                 <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0 shadow-lg backdrop-blur-md">
                   <div className="text-center pb-2">
@@ -1059,24 +1062,13 @@ export default function Sidebar() {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">隐力账号邮箱</label>
-                      <input
-                        type="email"
-                        required
-                        placeholder="yourname@example.com"
-                        value={yinliEmail}
-                        onChange={(e) => setYinliEmail(e.target.value)}
-                        className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">账号密码</label>
+                      <label className="text-[10px] text-slate-400 block mb-1">隐力 API Key (X-API-Key)</label>
                       <input
                         type="password"
                         required
-                        placeholder="••••••••"
-                        value={yinliPassword}
-                        onChange={(e) => setYinliPassword(e.target.value)}
+                        placeholder="yl_api_..."
+                        value={yinliApiKey}
+                        onChange={(e) => setYinliApiKey(e.target.value.trim())}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
                       />
                     </div>
@@ -1085,7 +1077,7 @@ export default function Sidebar() {
                       disabled={isLoggingIn}
                       className="w-full py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-semibold rounded-lg text-xs transition-all duration-200 active:scale-98 disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
-                      {isLoggingIn ? '正在建立安全连接...' : '🔗 登录并绑定账号'}
+                      {isLoggingIn ? '正在验证 API Key...' : '🔗 绑定开发者密钥'}
                     </button>
                   </div>
                 </div>
