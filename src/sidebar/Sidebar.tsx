@@ -429,14 +429,16 @@ export default function Sidebar() {
         throw new Error(data.error || '验证失败，请检查 API Key 或服务端连接');
       }
 
-      // 验证成功后，将 API Key 存为 Token
-      setYinliToken(targetKey);
+      // 验证成功后，优先使用服务端返回的 JWT Token，如果没有则回退使用输入的 API Key 本身
+      const actualToken = data.token || targetKey;
+      setYinliToken(actualToken);
       setYinliUser(data.user);
       
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         chrome.storage.local.set({
-          yinliToken: targetKey,
+          yinliToken: actualToken,
           yinliUser: data.user,
+          yinliApiUrl: yinliApiUrl, // 同时保存 API 服务端地址，以防重新启动后被重置为默认值导致验证失败
         });
       }
 
@@ -444,7 +446,7 @@ export default function Sidebar() {
       setYinliApiKey('');
       
       // 绑定成功后拉取产品列表
-      fetchYinliProducts(targetKey);
+      fetchYinliProducts(actualToken);
     } catch (err: any) {
       console.error(err);
       showToast(err.message || '连接异常，请确保 YL 协同服务运行中', 'error');
@@ -1060,7 +1062,13 @@ export default function Sidebar() {
                         type="text"
                         placeholder={`默认: ${DEFAULT_YINLI_URL}`}
                         value={yinliApiUrl}
-                        onChange={(e) => setYinliApiUrl(e.target.value.trim())}
+                        onChange={(e) => {
+                          const val = e.target.value.trim();
+                          setYinliApiUrl(val);
+                          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                            chrome.storage.local.set({ yinliApiUrl: val });
+                          }
+                        }}
                         className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
                       />
                     </div>
