@@ -20,7 +20,246 @@ type PostActivityMap = Record<string, PostActivity>;
 
 export default function Sidebar() {
   // 视图 Tab 切换
-  const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'settings'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'settings' | 'analysis'>('search');
+  
+  // AppStore 分析 Tab 的专属状态
+  const [analysisQuery, setAnalysisQuery] = useState('');
+  const [analysisCountry, setAnalysisCountry] = useState('us');
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  // 运行苹果 AppStore 的商业可行性与 ASO 关键词分析（无付费 API 纯净本地版）
+  const handleAppStoreAnalysis = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const query = analysisQuery.trim();
+    if (!query) {
+      setAnalysisError('请输入关键词或 App ID');
+      return;
+    }
+    
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    setAnalysisResults(null);
+
+    const country = analysisCountry;
+    // 获取对应的 X-Apple-Store-Front
+    const storeFronts: Record<string, string> = {
+      us: '143441-1,29',
+      cn: '143465-19,29',
+      jp: '143462-9,29',
+      gb: '143444-9,29',
+      tw: '143470-1,29',
+      hk: '143463-1,29'
+    };
+    const storeFrontHeader = storeFronts[country] || '143441-1,29';
+
+    try {
+      // 1. 判断输入是否为纯数字 (App ID)
+      const isAppId = /^\d+$/.test(query);
+      let appList: any[] = [];
+
+      if (isAppId) {
+        // 直接根据 ID 获取详情
+        const lookupUrl = `https://itunes.apple.com/lookup?id=${query}&country=${country}`;
+        const res = await fetch(lookupUrl);
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          appList = [data.results[0]];
+        } else {
+          throw new Error('未找到该 App ID 的详细信息');
+        }
+      } else {
+        // 根据关键词搜索排名前 5 的 App
+        const searchUrl = `https://itunes.apple.com/search?media=software&term=${encodeURIComponent(query)}&country=${country}&limit=5`;
+        const res = await fetch(searchUrl);
+        const data = await res.json();
+        appList = data.results || [];
+      }
+
+      if (appList.length === 0) {
+        throw new Error('未检索到相关应用，请更换检索词或地区');
+      }
+
+      // 2. 抓取 Autocomplete Hints 联想词树
+      let hintsList: string[] = [];
+      try {
+        const hintRes = await fetch(
+          `https://search.itunes.apple.com/WebObjects/MZSearchHints.woa/wa/hints?clientApplication=Software&term=${encodeURIComponent(isAppId ? appList[0].trackName : query)}`,
+          {
+            headers: {
+              'User-Agent': 'AppStore/3.0 iOS/15.0',
+              'X-Apple-Store-Front': storeFrontHeader
+            }
+          }
+        );
+        const hintText = await hintRes.text();
+        // 因为返回是 XML plist 格式，我们在本地用正则匹配 <string>...</string> 提取 hints
+        const termRegex = /<key>term<\/key>\s*<string>([^<]+)<\/string>/g;
+        let match;
+        while ((match = termRegex.exec(hintText)) !== null) {
+          const termVal = match[1].trim();
+          if (termVal && !hintsList.includes(termVal)) {
+            hintsList.push(termVal);
+          }
+        }
+      } catch (err) {
+        console.error('Fetch search hints failed:', err);
+      }
+
+      // 3. 对每一个 App 异步爬取详情页 HTML，提取内购项与精选评论
+      const analyzedApps = await Promise.all(
+        appList.map(async (app) => {
+          const trackId = app.trackId;
+          const detailPageUrl = `https://apps.apple.com/${country}/app/id${trackId}`;
+          let inAppPurchases: { name: string; price: string }[] = [];
+          let reviews: any[] = [];
+          
+          try {
+            // 直接抓取网页内容
+            const htmlRes = await fetch(detailPageUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              }
+            });
+            const htmlText = await htmlRes.text();
+            
+            // 匹配 serialized-server-data JSON 脚本
+            const serverDataRegex = /<script[^>]+id="serialized-server-data"[^>]*>([\s\S]*?)<\/script>/;
+            const match = htmlText.match(serverDataRegex);
+            if (match) {
+              const serverJson = JSON.parse(match[1].trim());
+              
+              // 提取 IAPs
+              const infoItems = serverJson.data?.[0]?.data?.shelfMapping?.information?.items || [];
+              const iapSection = infoItems.find(
+                (item: any) => item.title === "In-App Purchases" || item.title === "App 内购买项目"
+              );
+              if (iapSection && iapSection.items_V3) {
+                iapSection.items_V3.forEach((item: any) => {
+                  if (item.leadingText && item.trailingText) {
+                    inAppPurchases.push({ name: item.leadingText, price: item.trailingText });
+                  }
+                });
+              } else if (iapSection && iapSection.items && iapSection.items[0]?.textPairs) {
+                // 备用解析
+                iapSection.items[0].textPairs.forEach((pair: any) => {
+                  if (pair[0] && pair[1]) {
+                    inAppPurchases.push({ name: pair[0], price: pair[1] });
+                  }
+                });
+              }
+              
+              // 提取评论
+              const reviewsList = serverJson.data?.[0]?.data?.shelfMapping?.productRatings?.seeAllAction?.pageData?.shelves?.[1]?.items || [];
+              reviewsList.forEach((r: any) => {
+                if (r.$kind === 'Review') {
+                  reviews.push({
+                    id: r.id,
+                    title: r.title || '',
+                    date: r.date || '',
+                    content: r.contents || '',
+                    rating: r.rating || 0,
+                    author: r.reviewerName || '',
+                    developerResponse: r.response?.contents || null
+                  });
+                }
+              });
+            }
+          } catch (err) {
+            console.error(`Scrape details failed for app ${trackId}:`, err);
+          }
+          
+          // 计算该应用的 WTP (付费意愿) 和 NPI (痛点紧迫度)
+          let wtpCountPositive = 0;
+          let wtpCountNegative = 0;
+          let npiCount = 0;
+          
+          const wtpPositiveRegex = /已订阅|买了永久|值这个钱|付费支持|worth every penny|subscribed|purchased|lifetime|pro|buy/i;
+          const wtpNegativeRegex = /太贵|吃相难看|强制订阅|欺诈|广告太多|scam|overpriced|too expensive|ads|waste/i;
+          const painpointRegex = /希望加入|要是能|闪退|无法保存|缺少功能|bug|wish it had|missing feature|crash|please add/i;
+          
+          reviews.forEach((rev) => {
+            const text = `${rev.title} ${rev.content}`.toLowerCase();
+            if (wtpPositiveRegex.test(text)) wtpCountPositive++;
+            if (wtpNegativeRegex.test(text)) wtpCountNegative++;
+            if (painpointRegex.test(text) || rev.rating <= 3) npiCount++;
+          });
+          
+          const iapWeight = inAppPurchases.length > 0 ? (inAppPurchases.some(p => p.name.includes('Lifetime') || p.name.includes('永久') || p.name.includes('买断')) ? 2.0 : 1.5) : 0.5;
+          const calculatedWtp = reviews.length > 0 
+            ? Math.min(10, Math.round(((wtpCountPositive + 0.5 * (reviews.length - wtpCountPositive - wtpCountNegative)) / (wtpCountNegative + 1)) * iapWeight * 3)) 
+            : 5;
+            
+          const calculatedNpi = reviews.length > 0
+            ? Math.min(10, Math.round((npiCount / reviews.length) * 10))
+            : 3;
+            
+          return {
+            id: trackId,
+            name: app.trackName,
+            icon: app.artworkUrl100,
+            developer: app.artistName,
+            genre: app.primaryGenreName,
+            rating: app.averageUserRating || 0,
+            ratingCount: app.userRatingCount || 0,
+            price: app.formattedPrice || 'Free',
+            url: app.trackViewUrl,
+            inAppPurchases,
+            reviews,
+            wtp: calculatedWtp,
+            npi: calculatedNpi
+          };
+        })
+      );
+
+      // 4. 计算整个赛道的综合指标 (Macro Indicators)
+      const avgWtp = analyzedApps.length > 0 
+        ? Math.round(analyzedApps.reduce((acc, app) => acc + app.wtp, 0) / analyzedApps.length) 
+        : 0;
+      const avgNpi = analyzedApps.length > 0 
+        ? Math.round(analyzedApps.reduce((acc, app) => acc + app.npi, 0) / analyzedApps.length) 
+        : 0;
+
+      // 提取核心痛点词汇（词频统计）
+      const painWords: Record<string, number> = {};
+      const commonStopwords = ['the', 'and', 'to', 'a', 'of', 'in', 'is', 'it', 'for', 'this', 'that', 'with', 'but', 'i', 'you', 'app', 'my', 'on', 'have', 'are'];
+      analyzedApps.forEach(app => {
+        app.reviews.forEach(rev => {
+          if (rev.rating <= 3) {
+            const cleanText = `${rev.title} ${rev.content}`.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "").toLowerCase();
+            const words = cleanText.split(/\s+/);
+            words.forEach(w => {
+              if (w.length > 3 && !commonStopwords.includes(w)) {
+                painWords[w] = (painWords[w] || 0) + 1;
+              }
+            });
+          }
+        });
+      });
+      
+      const topPainWords = Object.entries(painWords)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(e => ({ word: e[0], count: e[1] }));
+
+      setAnalysisResults({
+        query: isAppId ? appList[0].trackName : query,
+        avgWtp,
+        avgNpi,
+        topPainWords,
+        apps: analyzedApps,
+        hints: hintsList
+      });
+
+    } catch (err: any) {
+      console.error(err);
+      setAnalysisError(err.message || '分析过程中发生未知错误，请重试');
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
   
   // 核心状态数据
   const [keywords, setKeywords] = useState<Keyword[]>([]);
@@ -1037,6 +1276,16 @@ export default function Sidebar() {
           📚 话术模板
         </button>
         <button
+          onClick={() => setActiveTab('analysis')}
+          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
+            activeTab === 'analysis' 
+              ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          📊 App分析
+        </button>
+        <button
           onClick={() => setActiveTab('settings')}
           className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'settings' 
@@ -1906,7 +2155,267 @@ export default function Sidebar() {
             </div>
           </div>
         )}
+
+        {/* VIEW 5: AppStore ASO 与商业可行性分析 */}
+        {activeTab === 'analysis' && (
+          <div className="flex flex-col h-full space-y-4 min-h-0 overflow-y-auto pr-1">
+            {/* 搜索控制区域 */}
+            <form onSubmit={handleAppStoreAnalysis} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+              <h3 className="text-xs font-semibold text-slate-300">🍎 AppStore 市场与 SEO 探针</h3>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="输入关键词（如: habit tracker）或 App ID"
+                  value={analysisQuery}
+                  onChange={(e) => setAnalysisQuery(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
+                />
+                <select
+                  value={analysisCountry}
+                  onChange={(e) => setAnalysisCountry(e.target.value)}
+                  className="px-2 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="us">美国 🇺🇸</option>
+                  <option value="cn">中国 🇨🇳</option>
+                  <option value="jp">日本 🇯🇵</option>
+                  <option value="gb">英国 🇬🇧</option>
+                  <option value="tw">中国台湾 🇹🇼</option>
+                  <option value="hk">中国香港 🇭🇰</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                disabled={analysisLoading}
+                className="w-full py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-lg text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1.5 shadow-md shadow-indigo-950/20"
+              >
+                {analysisLoading ? (
+                  <>
+                    <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>正在深度解析 AppStore 数据...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🚀 开始真实商业化评估</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            {analysisError && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 shrink-0">
+                ⚠️ {analysisError}
+              </div>
+            )}
+
+            {/* 分析结果展示区 */}
+            {analysisResults ? (
+              <div className="space-y-4 pb-4">
+                {/* 1. 赛道宏观仪表盘 */}
+                <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 p-4 rounded-2xl border border-slate-800/80 space-y-4 shrink-0">
+                  <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1">
+                    🎯 赛道洞察: <span className="text-indigo-400">"{analysisResults.query}"</span>
+                  </h3>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col justify-between">
+                      <span className="text-[10px] text-slate-400">平均付费意愿 (WTP)</span>
+                      <div className="flex items-baseline gap-1 mt-1.5">
+                        <span className="text-2xl font-black text-indigo-400">{analysisResults.avgWtp}</span>
+                        <span className="text-[10px] text-slate-500">/ 10</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full" 
+                          style={{ width: `${analysisResults.avgWtp * 10}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col justify-between">
+                      <span className="text-[10px] text-slate-400">用户痛点紧迫度 (NPI)</span>
+                      <div className="flex items-baseline gap-1 mt-1.5">
+                        <span className="text-2xl font-black text-violet-400">{analysisResults.avgNpi}</span>
+                        <span className="text-[10px] text-slate-500">/ 10</span>
+                      </div>
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full" 
+                          style={{ width: `${analysisResults.avgNpi * 10}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 核心痛点高频词 */}
+                  {analysisResults.topPainWords.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      <h4 className="text-[10px] font-semibold text-slate-400">用户主流诉求 & 痛点词频:</h4>
+                      <div className="flex flex-wrap gap-1.5">
+                        {analysisResults.topPainWords.map((item: any, idx: number) => (
+                          <span 
+                            key={idx} 
+                            className="px-2 py-0.5 bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded text-[9px] font-medium"
+                          >
+                            #{item.word} ({item.count})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. SEO / ASO 搜索联想词树 */}
+                {analysisResults.hints.length > 0 && (
+                  <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-2.5 shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-slate-200">🏷️ AppStore 搜索联想词 (ASO SEO)</h3>
+                      <span className="text-[9px] text-slate-500">反映真实用户输入词频</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                      {analysisResults.hints.map((term: string, idx: number) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            setAnalysisQuery(term);
+                          }}
+                          className="px-2.5 py-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-slate-300 hover:text-slate-100 rounded-lg text-[10px] transition-colors"
+                        >
+                          {term}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. 竞品 App格局深度解构 */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-slate-400">📱 竞品格局与商业模式解构</h3>
+                  <div className="space-y-3">
+                    {analysisResults.apps.map((app: any) => (
+                      <AppDetailCard key={app.id} app={app} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              !analysisLoading && (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-slate-900/20 rounded-2xl border border-slate-900/60">
+                  <span className="text-4xl">📊</span>
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-slate-300">暂无分析数据</p>
+                    <p className="text-[10px] text-slate-500 max-w-[200px] leading-relaxed">请输入关键词或具体 App ID，系统将实时爬取 Apple AppStore 数据并计算付费意愿与痛点分布。</p>
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
 }
+
+// 竞品卡片子组件
+function AppDetailCard({ app }: { app: any }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="bg-slate-900/60 rounded-xl border border-slate-800/80 overflow-hidden transition-all duration-205">
+      {/* 头部摘要 */}
+      <div 
+        onClick={() => setExpanded(!expanded)}
+        className="p-3 flex items-start gap-3 cursor-pointer hover:bg-slate-900/40 transition-colors"
+      >
+        <img 
+          src={app.icon} 
+          alt={app.name} 
+          className="w-10 h-10 rounded-xl object-cover border border-slate-850 shrink-0" 
+        />
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-xs font-bold text-slate-100 truncate">{app.name}</h4>
+            <span className="text-[10px] font-black text-indigo-400 shrink-0">WTP: {app.wtp}</span>
+          </div>
+          <p className="text-[10px] text-slate-500 truncate">{app.developer} · {app.genre}</p>
+          <div className="flex items-center justify-between text-[9px] text-slate-400 pt-1">
+            <div className="flex items-center gap-1">
+              <span className="text-amber-500">★</span>
+              <span>{app.rating.toFixed(1)}</span>
+              <span className="text-slate-500">({app.ratingCount})</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500">痛点 NPI: {app.npi}</span>
+              <span className="px-1.5 py-0.2 bg-slate-950 rounded border border-slate-800 text-slate-300 font-semibold">{app.price}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 展开部分 */}
+      {expanded && (
+        <div className="border-t border-slate-850/50 bg-slate-950/40 p-3 space-y-3 text-[11px]">
+          {/* 内购项列表 */}
+          <div className="space-y-1.5">
+            <h5 className="font-bold text-slate-400 flex items-center gap-1 text-[10px]">
+              💰 App 内购买项目 (In-App Purchases)
+            </h5>
+            {app.inAppPurchases.length > 0 ? (
+              <div className="grid grid-cols-1 gap-1 pl-1">
+                {app.inAppPurchases.map((iap: any, idx: number) => (
+                  <div key={idx} className="flex justify-between items-center py-0.5 border-b border-slate-900/40 last:border-0">
+                    <span className="text-slate-300 truncate pr-2">{iap.name}</span>
+                    <span className="text-indigo-400 font-bold font-mono text-[10px] shrink-0">{iap.price}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-600 pl-1">未检测到 App 内购买项目 (可能靠广告变现或完全免费)</p>
+            )}
+          </div>
+
+          {/* 精选评论分析 */}
+          <div className="space-y-2">
+            <h5 className="font-bold text-slate-400 flex items-center justify-between text-[10px]">
+              <span>💬 用户深度口碑与反馈 ({app.reviews.length} 条)</span>
+              <a 
+                href={app.url} 
+                target="_blank" 
+                rel="noreferrer" 
+                className="text-indigo-400 hover:text-indigo-300 transition-colors text-[9px]"
+              >
+                去 AppStore 查看 ↗
+              </a>
+            </h5>
+            {app.reviews.length > 0 ? (
+              <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
+                {app.reviews.map((rev: any) => (
+                  <div key={rev.id} className="bg-slate-900/40 p-2 rounded-lg border border-slate-900 space-y-1">
+                    <div className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="font-bold text-slate-300 truncate">{rev.title}</span>
+                      <div className="flex items-center gap-1 text-amber-500 shrink-0 font-mono text-[9px]">
+                        {'★'.repeat(rev.rating)}{'☆'.repeat(5 - rev.rating)}
+                      </div>
+                    </div>
+                    <p className="text-slate-400 text-[10px] leading-relaxed whitespace-pre-wrap">{rev.content}</p>
+                    {rev.developerResponse && (
+                      <div className="mt-1.5 p-1.5 bg-indigo-950/20 border-l border-indigo-500/30 rounded text-[9.5px] text-indigo-300">
+                        <p className="font-bold text-[9px] mb-0.5 text-indigo-400">开发者回复：</p>
+                        <p>{rev.developerResponse}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-600 pl-1">未抓取到精选评论数据</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

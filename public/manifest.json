@@ -48,6 +48,7 @@
     "*://*.facebook.com/*",
     "*://localhost/*",
     "*://seevoid.com/*",
-    "*://*.seevoid.com/*"
+    "*://*.seevoid.com/*",
+    "*://*.apple.com/*"
   ]
 }
