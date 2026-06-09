@@ -5,6 +5,16 @@ import { PLATFORM_CONFIG, DEFAULT_MEMO_TEMPLATES } from '../shared/constants.js'
 const DEFAULT_YINLI_URL = (import.meta as any).env?.VITE_YINLI_API_URL || 
   ((import.meta as any).env?.DEV ? 'http://localhost:3000' : 'https://seevoid.com');
 
+const getAuthHeaders = (token: string): Record<string, string> => {
+  if (!token) return {};
+  // 识别是否是 API Key (以 yl_api_ 开头，或者是不包含 JWT 特征 '.' 的 token)
+  const isApiKey = token.startsWith('yl_api_') || !token.includes('.');
+  if (isApiKey) {
+    return { 'X-API-Key': token };
+  }
+  return { 'Authorization': `Bearer ${token}` };
+};
+
 type PostActivity = {
   viewedAt?: number;
   openedAt?: number;
@@ -415,11 +425,11 @@ export default function Sidebar() {
     setIsLoggingIn(true);
     const targetKey = yinliApiKey.trim();
     try {
-      // 通过 /api/auth/me 进行 API Key 的有效性验证，传入 Authorization: Bearer <API_KEY>
+      // 通过 /api/auth/me 进行 API Key 的有效性验证
       const res = await fetch(`${yinliApiUrl}/api/auth/me`, {
         method: 'GET',
         headers: { 
-          'Authorization': `Bearer ${targetKey}`,
+          ...getAuthHeaders(targetKey),
           'Accept': 'application/json'
         },
       });
@@ -481,7 +491,9 @@ export default function Sidebar() {
 
     try {
       const res = await fetch(`${yinliApiUrl}/api/product`, {
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { 
+          ...getAuthHeaders(token)
+        },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '获取产品失败');
@@ -513,7 +525,9 @@ export default function Sidebar() {
     try {
       // 仅拉取 NEW、STRATEGIZED、APPROVED 状态的信号，排除已发布的信号
       const res = await fetch(`${yinliApiUrl}/api/product/${productId}/strategies?status=NEW,STRATEGIZED,APPROVED`, {
-        headers: { 'Authorization': `Bearer ${yinliToken}` },
+        headers: { 
+          ...getAuthHeaders(yinliToken)
+        },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '获取信号失败');
@@ -540,7 +554,7 @@ export default function Sidebar() {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${yinliToken}`,
+          ...getAuthHeaders(yinliToken),
         },
         body: JSON.stringify({ status }),
       });
