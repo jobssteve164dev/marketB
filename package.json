@@ -1,6 +1,6 @@
 {
   "name": "chrome-marketing-sidebar",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Chrome extension for cross-platform marketing automation",
   "type": "module",
   "scripts": {
