@@ -4,47 +4,63 @@ import type { Post } from '../../shared/types.js';
 export class BilibiliAdapter extends BaseAdapter {
   platform: 'bilibili' = 'bilibili';
 
-  private pickStatText(card: Element, kind: 'play' | 'danmaku', fallbackIndex: number): string {
-    const directSelectors = kind === 'play'
-      ? [
-          '.bili-video-card__stats--play',
-          '.bili-video-card__stats--item[title*="播放"]',
-          '.bili-video-card__stats--item[aria-label*="播放"]',
-          '[class*="play"]',
-          '.watch-num',
-          '.play-text'
-        ]
-      : [
-          '.bili-video-card__stats--danmaku',
-          '.bili-video-card__stats--item[title*="弹幕"]',
-          '.bili-video-card__stats--item[aria-label*="弹幕"]',
-          '[class*="danmaku"]',
-          '.hide-danmaku',
-          '.danmaku-text'
-        ];
+  private getStatsFromCard(card: Element): { play: string; danmaku: string } {
+    let play = '';
+    let danmaku = '';
 
-    for (const selector of directSelectors) {
-      const element = card.querySelector(selector) as HTMLElement | null;
-      const text = this.readStatElementText(element);
-      if (text) return text;
+    // 1. 现代 B 站卡片布局中的 stats-item (.bili-video-card__stats--item)
+    // 它是包裹 svg 和 text 的容器，我们直接取其 textContent 即可
+    const statsItems = Array.from(card.querySelectorAll('.bili-video-card__stats--item'));
+    if (statsItems.length >= 2) {
+      play = statsItems[0].textContent || '';
+      danmaku = statsItems[1].textContent || '';
     }
 
-    const statItems = Array.from(card.querySelectorAll(
-      '.bili-video-card__stats--item, .bili-video-card__stats--text, [class*="stats"] span'
-    )) as HTMLElement[];
-    const usefulTexts = statItems
-      .map(element => this.readStatElementText(element))
-      .filter(Boolean);
+    // 2. 如果上面没拿到，尝试用特定 class 直接定位
+    if (!play || !danmaku) {
+      // 播放数常见 class
+      const playEl = card.querySelector('.play, .watch-num, .click, .play-info, .video-play, [class*="play-count"], [class*="watch-count"]');
+      // 弹幕数常见 class
+      const danmuEl = card.querySelector('.danmu, .dm-num, .dm, .danmu-info, .video-danmu, [class*="danmu-count"], [class*="dm-count"]');
+      
+      if (playEl && !play) play = playEl.textContent || '';
+      if (danmuEl && !danmaku) danmaku = danmuEl.textContent || '';
+    }
 
-    return usefulTexts[fallbackIndex] || '0';
-  }
+    // 3. 如果还是没有，尝试从 bili-video-card__stats 容器文本中正则提取两个数字
+    if (!play || !danmaku) {
+      const container = card.querySelector('.bili-video-card__stats, [class*="stats-container"], .stats') as HTMLElement | null;
+      if (container) {
+        // 排除 duration 带来的干扰（通常 duration 在 bili-video-card__stats__duration）
+        // 我们可以克隆一份，移除 duration，防止其数字干扰
+        const clone = container.cloneNode(true) as HTMLElement;
+        const durationEl = clone.querySelector('[class*="duration"], [class*="time"]');
+        if (durationEl) {
+          durationEl.remove();
+        }
+        const text = clone.textContent || '';
+        const matches = text.replace(/\s+/g, ' ').trim().match(/(\d+(?:\.\d+)?\s*(?:万|亿|k|m)?)/g);
+        if (matches) {
+          if (matches.length >= 2) {
+            if (!play) play = matches[0];
+            if (!danmaku) danmaku = matches[1];
+          } else if (matches.length === 1) {
+            if (!play) play = matches[0];
+            if (!danmaku) danmaku = '0';
+          }
+        }
+      }
+    }
 
-  private readStatElementText(element: HTMLElement | null): string {
-    if (!element) return '';
-    const title = element.getAttribute('title') || element.getAttribute('aria-label') || '';
-    const text = `${title} ${element.textContent || ''}`.replace(/\s+/g, ' ').trim();
-    const match = text.match(/(\d+(?:\.\d+)?\s*(?:万|亿|k|m)?)/i);
-    return match ? match[1] : '';
+    // 4. 清理并归一化
+    const cleanNum = (str: string) => {
+      return str.replace(/\s+/g, '').trim() || '0';
+    };
+
+    return {
+      play: cleanNum(play),
+      danmaku: cleanNum(danmaku)
+    };
   }
 
   private isVisible(element: HTMLElement): boolean {
@@ -292,8 +308,9 @@ export class BilibiliAdapter extends BaseAdapter {
         const authorEl = card.querySelector('.bili-video-card__info--author, .up-name, .up-info') as HTMLElement | null;
         const author = authorEl ? (authorEl.textContent || '').trim() : 'Bilibili UP主';
         
-        const playText = this.pickStatText(card, 'play', 0);
-        const danmakuText = this.pickStatText(card, 'danmaku', 1);
+        const stats = this.getStatsFromCard(card);
+        const playText = stats.play;
+        const danmakuText = stats.danmaku;
         
         const playCount = this.parseNumber(playText);
         const danmakuCount = this.parseNumber(danmakuText);

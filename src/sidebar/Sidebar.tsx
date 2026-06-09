@@ -31,6 +31,17 @@ export default function Sidebar() {
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
+  // 翻译功能专属状态
+  const [enableTranslation, setEnableTranslation] = useState(false);
+  const [translationCache, setTranslationCache] = useState<Record<string, string>>({});
+
+  const handleAddTranslation = (original: string, translated: string) => {
+    setTranslationCache(prev => ({ ...prev, [original]: translated }));
+  };
+
+  // 记录上次检测到的标签页 URL，用于切换关键词或页面时清空抓取列表
+  const [lastUrl, setLastUrl] = useState('');
+
   // 运行苹果 AppStore 的商业可行性与 ASO 关键词分析（无付费 API 纯净本地版）
   const handleAppStoreAnalysis = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -340,6 +351,7 @@ export default function Sidebar() {
             rating: app.rating,
             ratingCount: app.ratingCount,
             oppScore: app.oppScore,
+            url: app.url,
             coreComplaints
           };
         });
@@ -547,6 +559,18 @@ export default function Sidebar() {
         
         // 解析匹配的平台
         const urlStr = tab.url || '';
+        
+        // 如果活动页的 URL 变化了，且是非空（例如新关键词搜索），清空旧抓取视频列表
+        setLastUrl((prevUrl) => {
+          if (urlStr && prevUrl && urlStr !== prevUrl) {
+            // URL 确实发生了改变，重置视频抓取列表
+            setPosts([]);
+            setSelectedPostIds([]);
+            setSelectedPost(null);
+          }
+          return urlStr;
+        });
+
         if (urlStr.includes('bilibili.com')) {
           setCurrentPlatform('bilibili');
         } else if (urlStr.includes('youtube.com')) {
@@ -587,6 +611,11 @@ export default function Sidebar() {
   // 3. 执行关键词搜索跳转
   const handleSearchKeyword = (keywordText: string) => {
     if (!keywordText.trim()) return;
+
+    // 清空上一个关键词的抓取视频列表
+    setPosts([]);
+    setSelectedPostIds([]);
+    setSelectedPost(null);
 
     // 更新最后搜索时间
     const updatedKeywords = keywords.map(kw => {
@@ -1279,7 +1308,20 @@ export default function Sidebar() {
             营销自动化助手
           </h1>
         </div>
-        <div>
+        <div className="flex items-center gap-2">
+          {/* 翻译自动开关 */}
+          <button
+            onClick={() => setEnableTranslation(!enableTranslation)}
+            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-all duration-200 flex items-center gap-1 ${
+              enableTranslation 
+                ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 hover:bg-indigo-600/30' 
+                : 'bg-slate-800 text-slate-400 border-slate-700/60 hover:text-slate-300 hover:bg-slate-700/60'
+            }`}
+            title={enableTranslation ? "点击关闭自动翻译" : "点击开启自动翻译（免费谷歌服务）"}
+          >
+            <span>🌐 {enableTranslation ? '译: 开' : '译: 关'}</span>
+          </button>
+
           {currentPlatform ? (
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border flex items-center gap-1.5 ${
               currentPlatform === 'bilibili' 
@@ -1735,7 +1777,12 @@ export default function Sidebar() {
                           </span>
                         </div>
                         <p className="text-xs font-medium text-slate-200 line-clamp-2 leading-relaxed">
-                          {post.content}
+                          <TranslatedText 
+                            text={post.content} 
+                            enabled={enableTranslation} 
+                            cache={translationCache} 
+                            onTranslated={handleAddTranslation} 
+                          />
                         </p>
                         
                         <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1">
@@ -1840,10 +1887,20 @@ export default function Sidebar() {
                         </div>
                       </div>
                       <div className="text-xs text-slate-200 font-semibold line-clamp-1">
-                        {selectedYinliSignal.title}
+                        <TranslatedText 
+                          text={selectedYinliSignal.title} 
+                          enabled={enableTranslation} 
+                          cache={translationCache} 
+                          onTranslated={handleAddTranslation} 
+                        />
                       </div>
                       <div className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed bg-slate-900/40 p-1.5 rounded border border-slate-900/60">
-                        {selectedYinliSignal.textContent}
+                        <TranslatedText 
+                          text={selectedYinliSignal.textContent} 
+                          enabled={enableTranslation} 
+                          cache={translationCache} 
+                          onTranslated={handleAddTranslation} 
+                        />
                       </div>
                       <div className="flex items-center justify-between text-[9px] text-slate-500 pt-0.5">
                         <span>👤 {selectedYinliSignal.author || '未知用户'}</span>
@@ -1882,7 +1939,14 @@ export default function Sidebar() {
                             }`}>
                               {post.platform === 'bilibili' ? 'B站' : post.platform === 'youtube' ? 'YT' : post.platform === 'twitter' ? 'X' : 'FB'}
                             </span>
-                            <span className="truncate italic">"{post.content}"</span>
+                            <span className="truncate italic">
+                              "<TranslatedText 
+                                text={post.content} 
+                                enabled={enableTranslation} 
+                                cache={translationCache} 
+                                onTranslated={handleAddTranslation} 
+                              />"
+                            </span>
                           </div>
                           <button
                             onClick={() => handleToggleCheckbox(post.id, false)}
@@ -2385,9 +2449,22 @@ export default function Sidebar() {
                           <div className="flex items-center gap-2">
                             <img src={opApp.icon} className="w-6 h-6 rounded-md object-cover border border-slate-800" alt={opApp.name} />
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-slate-200 truncate">{opApp.name}</span>
-                                <span className="text-[9px] text-rose-400 font-bold bg-rose-500/10 px-1 py-0.2 rounded">潜力指数: {opApp.oppScore}</span>
+                              <div className="flex items-center justify-between gap-1.5">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-xs font-bold text-slate-200 truncate">{opApp.name}</span>
+                                  {opApp.url && (
+                                    <a
+                                      href={opApp.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-indigo-400 hover:text-indigo-300 text-[10px] shrink-0 font-semibold"
+                                      title="在 App Store 中打开"
+                                    >
+                                      ↗
+                                    </a>
+                                  )}
+                                </div>
+                                <span className="text-[9px] text-rose-400 font-bold bg-rose-500/10 px-1 py-0.2 rounded shrink-0">潜力指数: {opApp.oppScore}</span>
                               </div>
                               <p className="text-[9px] text-slate-500 flex justify-between pt-0.5">
                                 <span>评分: {opApp.rating.toFixed(1)} ★ ({opApp.ratingCount} 个评分)</span>
@@ -2401,7 +2478,20 @@ export default function Sidebar() {
                               <span className="text-[9px] font-black text-rose-300 block">💡 致命痛点切入点 (有极大重构升级空间)：</span>
                               {opApp.coreComplaints.map((c: any, cIdx: number) => (
                                 <div key={cIdx} className="text-[9.5px] leading-relaxed text-slate-400 pl-1 border-l border-rose-400/40 my-1">
-                                  <span className="font-bold text-rose-400">“{c.title}”</span> - {c.content.slice(0, 150)}{c.content.length > 150 ? '...' : ''}
+                                  <span className="font-bold text-rose-400">
+                                    “<TranslatedText 
+                                      text={c.title} 
+                                      enabled={enableTranslation} 
+                                      cache={translationCache} 
+                                      onTranslated={handleAddTranslation} 
+                                    />”
+                                  </span> -{' '}
+                                  <TranslatedText 
+                                    text={c.content.slice(0, 150) + (c.content.length > 150 ? '...' : '')} 
+                                    enabled={enableTranslation} 
+                                    cache={translationCache} 
+                                    onTranslated={handleAddTranslation} 
+                                  />
                                 </div>
                               ))}
                             </div>
@@ -2440,7 +2530,13 @@ export default function Sidebar() {
                   <h3 className="text-xs font-bold text-slate-400">📱 竞品格局与商业模式解构</h3>
                   <div className="space-y-3">
                     {analysisResults.apps.map((app: any) => (
-                      <AppDetailCard key={app.id} app={app} />
+                      <AppDetailCard 
+                        key={app.id} 
+                        app={app} 
+                        enableTranslation={enableTranslation}
+                        translationCache={translationCache}
+                        onTranslated={handleAddTranslation}
+                      />
                     ))}
                   </div>
                 </div>
@@ -2464,14 +2560,28 @@ export default function Sidebar() {
 }
 
 // 竞品卡片子组件
-function AppDetailCard({ app }: { app: any }) {
+function AppDetailCard({ 
+  app, 
+  enableTranslation, 
+  translationCache, 
+  onTranslated 
+}: { 
+  app: any; 
+  enableTranslation: boolean; 
+  translationCache: Record<string, string>; 
+  onTranslated: (original: string, translated: string) => void; 
+}) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="bg-slate-900/60 rounded-xl border border-slate-800/80 overflow-hidden transition-all duration-205">
-      {/* 头部摘要 */}
+      {/* 头部摘要 - 点击直接跳转到对应的 app 详情页面 */}
       <div 
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => {
+          if (app.url) {
+            window.open(app.url, '_blank');
+          }
+        }}
         className="p-3 flex items-start gap-3 cursor-pointer hover:bg-slate-900/40 transition-colors"
       >
         <img 
@@ -2482,7 +2592,19 @@ function AppDetailCard({ app }: { app: any }) {
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex items-center justify-between gap-2">
             <h4 className="text-xs font-bold text-slate-100 truncate">{app.name}</h4>
-            <span className="text-[10px] font-black text-indigo-400 shrink-0">WTP: {app.wtp}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] font-black text-indigo-400">WTP: {app.wtp}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpanded(!expanded);
+                }}
+                className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors flex items-center justify-center min-w-[20px] h-[20px] font-mono text-[10px]"
+                title={expanded ? "收起详情" : "展开详情"}
+              >
+                {expanded ? '▲' : '▼'}
+              </button>
+            </div>
           </div>
           <p className="text-[10px] text-slate-500 truncate">{app.developer} · {app.genre}</p>
           <div className="flex items-center justify-between text-[9px] text-slate-400 pt-1">
@@ -2539,16 +2661,37 @@ function AppDetailCard({ app }: { app: any }) {
                 {app.reviews.map((rev: any) => (
                   <div key={rev.id} className="bg-slate-900/40 p-2 rounded-lg border border-slate-900 space-y-1">
                     <div className="flex items-center justify-between gap-2 text-[10px]">
-                      <span className="font-bold text-slate-300 truncate">{rev.title}</span>
+                      <span className="font-bold text-slate-300 truncate">
+                        <TranslatedText 
+                          text={rev.title} 
+                          enabled={enableTranslation} 
+                          cache={translationCache} 
+                          onTranslated={onTranslated} 
+                        />
+                      </span>
                       <div className="flex items-center gap-1 text-amber-500 shrink-0 font-mono text-[9px]">
                         {'★'.repeat(rev.rating)}{'☆'.repeat(5 - rev.rating)}
                       </div>
                     </div>
-                    <p className="text-slate-400 text-[10px] leading-relaxed whitespace-pre-wrap">{rev.content}</p>
+                    <p className="text-slate-400 text-[10px] leading-relaxed whitespace-pre-wrap">
+                      <TranslatedText 
+                        text={rev.content} 
+                        enabled={enableTranslation} 
+                        cache={translationCache} 
+                        onTranslated={onTranslated} 
+                      />
+                    </p>
                     {rev.developerResponse && (
                       <div className="mt-1.5 p-1.5 bg-indigo-950/20 border-l border-indigo-500/30 rounded text-[9.5px] text-indigo-300">
                         <p className="font-bold text-[9px] mb-0.5 text-indigo-400">开发者回复：</p>
-                        <p>{rev.developerResponse}</p>
+                        <p>
+                          <TranslatedText 
+                            text={rev.developerResponse} 
+                            enabled={enableTranslation} 
+                            cache={translationCache} 
+                            onTranslated={onTranslated} 
+                          />
+                        </p>
                       </div>
                     )}
                   </div>
@@ -2563,4 +2706,74 @@ function AppDetailCard({ app }: { app: any }) {
     </div>
   );
 }
+
+// 自动翻译组件
+interface TranslatedTextProps {
+  text: string;
+  enabled: boolean;
+  cache: Record<string, string>;
+  onTranslated: (original: string, translated: string) => void;
+}
+
+function TranslatedText({ text, enabled, cache, onTranslated }: TranslatedTextProps) {
+  const [translating, setTranslating] = useState(false);
+
+  useEffect(() => {
+    if (enabled && text && !cache[text] && !translating) {
+      // 简单判断是否包含英文/外文特征（排除纯数字、标点符号，如果全都是中文字符或数字，则不翻译以节省请求）
+      const hasForeignText = /[a-zA-Z]/i.test(text);
+      if (!hasForeignText) {
+        return;
+      }
+
+      setTranslating(true);
+      const doTranslate = async () => {
+        try {
+          const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const json = await res.json();
+            if (json && json[0]) {
+              const translated = json[0].map((item: any) => item[0]).join('').trim();
+              if (translated) {
+                onTranslated(text, translated);
+              }
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setTranslating(false);
+        }
+      };
+      doTranslate();
+    }
+  }, [enabled, text, cache, translating]);
+
+  if (!enabled) return <>{text}</>;
+  
+  if (cache[text]) {
+    return (
+      <span className="text-slate-300">
+        {cache[text]}
+        <span className="text-[8px] text-indigo-400 bg-indigo-500/10 px-1 py-0.2 rounded ml-1 scale-90 inline-block font-normal">译</span>
+      </span>
+    );
+  }
+
+  if (translating) {
+    return (
+      <span className="text-slate-500 inline-flex items-center gap-1">
+        <svg className="animate-spin h-3 w-3 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+        <span className="opacity-50 text-[10px] truncate max-w-[120px]">{text}</span>
+      </span>
+    );
+  }
+
+  return <>{text}</>;
+}
+
 
