@@ -7,12 +7,7 @@ const DEFAULT_YINLI_URL = (import.meta as any).env?.VITE_YINLI_API_URL ||
 
 const getAuthHeaders = (token: string): Record<string, string> => {
   if (!token) return {};
-  // 识别是否是 API Key (以 yl_api_ 开头，或者是不包含 JWT 特征 '.' 的 token)
-  const isApiKey = token.startsWith('yl_api_') || !token.includes('.');
-  if (isApiKey) {
-    return { 'X-API-Key': token };
-  }
-  return { 'Authorization': `Bearer ${token}` };
+  return { 'X-API-Key': token };
 };
 
 type PostActivity = {
@@ -439,14 +434,13 @@ export default function Sidebar() {
         throw new Error(data.error || '验证失败，请检查 API Key 或服务端连接');
       }
 
-      // 验证成功后，优先使用服务端返回的 JWT Token，如果没有则回退使用输入的 API Key 本身
-      const actualToken = data.token || targetKey;
-      setYinliToken(actualToken);
+      // 验证成功后，直接使用输入的 API Key 作为 token 保存
+      setYinliToken(targetKey);
       setYinliUser(data.user);
       
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         chrome.storage.local.set({
-          yinliToken: actualToken,
+          yinliToken: targetKey,
           yinliUser: data.user,
           yinliApiUrl: yinliApiUrl, // 同时保存 API 服务端地址，以防重新启动后被重置为默认值导致验证失败
         });
@@ -456,7 +450,7 @@ export default function Sidebar() {
       setYinliApiKey('');
       
       // 绑定成功后拉取产品列表
-      fetchYinliProducts(actualToken);
+      fetchYinliProducts(targetKey);
     } catch (err: any) {
       console.error(err);
       showToast(err.message || '连接异常，请确保 YL 协同服务运行中', 'error');
