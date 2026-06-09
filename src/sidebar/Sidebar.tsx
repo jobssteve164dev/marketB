@@ -26,6 +26,8 @@ export default function Sidebar() {
   const [analysisQuery, setAnalysisQuery] = useState('');
   const [analysisCountry, setAnalysisCountry] = useState('us');
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisTotal, setAnalysisTotal] = useState(0);
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
@@ -41,6 +43,8 @@ export default function Sidebar() {
     setAnalysisLoading(true);
     setAnalysisError(null);
     setAnalysisResults(null);
+    setAnalysisProgress(0);
+    setAnalysisTotal(0);
 
     const country = analysisCountry;
     // 获取对应的 X-Apple-Store-Front
@@ -70,8 +74,8 @@ export default function Sidebar() {
           throw new Error('未找到该 App ID 的详细信息');
         }
       } else {
-        // 根据关键词搜索排名前 5 的 App
-        const searchUrl = `https://itunes.apple.com/search?media=software&term=${encodeURIComponent(query)}&country=${country}&limit=5`;
+        // 根据关键词搜索排名前 10 的 App（扩大样本数据）
+        const searchUrl = `https://itunes.apple.com/search?media=software&term=${encodeURIComponent(query)}&country=${country}&limit=10`;
         const res = await fetch(searchUrl);
         const data = await res.json();
         appList = data.results || [];
@@ -80,6 +84,8 @@ export default function Sidebar() {
       if (appList.length === 0) {
         throw new Error('未检索到相关应用，请更换检索词或地区');
       }
+
+      setAnalysisTotal(appList.length);
 
       // 2. 抓取 Autocomplete Hints 联想词树
       let hintsList: string[] = [];
@@ -168,6 +174,9 @@ export default function Sidebar() {
             }
           } catch (err) {
             console.error(`Scrape details failed for app ${trackId}:`, err);
+          } finally {
+            // 增加实时抓取进度更新
+            setAnalysisProgress(prev => prev + 1);
           }
           
           // 计算该应用的 WTP (付费意愿) 和 NPI (痛点紧迫度)
@@ -194,6 +203,12 @@ export default function Sidebar() {
           const calculatedNpi = reviews.length > 0
             ? Math.min(10, Math.round((npiCount / reviews.length) * 10))
             : 3;
+
+          // 计算“反向优化突破潜力分 (Opportunity Score)”
+          // 公式: log10(评分数 + 1) * (5 - 评分)
+          const ratingCount = app.userRatingCount || 0;
+          const logRatingCount = Math.log10(ratingCount + 1);
+          const calculatedOppScore = Number((logRatingCount * (5 - (app.averageUserRating || 0))).toFixed(2));
             
           return {
             id: trackId,
@@ -202,13 +217,14 @@ export default function Sidebar() {
             developer: app.artistName,
             genre: app.primaryGenreName,
             rating: app.averageUserRating || 0,
-            ratingCount: app.userRatingCount || 0,
+            ratingCount,
             price: app.formattedPrice || 'Free',
             url: app.trackViewUrl,
             inAppPurchases,
             reviews,
             wtp: calculatedWtp,
-            npi: calculatedNpi
+            npi: calculatedNpi,
+            oppScore: calculatedOppScore
           };
         })
       );
@@ -221,27 +237,112 @@ export default function Sidebar() {
         ? Math.round(analyzedApps.reduce((acc, app) => acc + app.npi, 0) / analyzedApps.length) 
         : 0;
 
-      // 提取核心痛点词汇（词频统计）
-      const painWords: Record<string, number> = {};
-      const commonStopwords = ['the', 'and', 'to', 'a', 'of', 'in', 'is', 'it', 'for', 'this', 'that', 'with', 'but', 'i', 'you', 'app', 'my', 'on', 'have', 'are'];
-      analyzedApps.forEach(app => {
-        app.reviews.forEach(rev => {
-          if (rev.rating <= 3) {
-            const cleanText = `${rev.title} ${rev.content}`.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "").toLowerCase();
-            const words = cleanText.split(/\s+/);
-            words.forEach(w => {
-              if (w.length > 3 && !commonStopwords.includes(w)) {
-                painWords[w] = (painWords[w] || 0) + 1;
-              }
-            });
-          }
-        });
-      });
+      // 5. 优化短语级 ASO SEO 词频统计（中英文 N-Gram 分词）
+      const isChinese = ['cn', 'tw', 'hk'].includes(country) || /[\u4e00-\u9fff]/.test(query);
+      const lang = isChinese ? 'zh' : 'en';
       
-      const topPainWords = Object.entries(painWords)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(e => ({ word: e[0], count: e[1] }));
+      const extractPhrases = (apps: any[], language: 'zh' | 'en') => {
+        const phraseCounts: Record<string, number> = {};
+        
+        const enStopwords = [
+          'the', 'and', 'to', 'a', 'of', 'in', 'is', 'it', 'for', 'this', 'that', 'with', 
+          'but', 'i', 'you', 'app', 'my', 'on', 'have', 'are', 'was', 'so', 'just', 'be', 
+          'or', 'not', 'at', 'an', 'as', 'if', 'me', 'my', 'can', 'with', 'about', 'would',
+          'there', 'their', 'they', 'we', 'our', 'will', 'this', 'get', 'like', 'good', 
+          'great', 'love', 'use', 'really', 'very', 'more', 'when', 'some', 'out', 'all',
+          'one', 'only', 'than', 'into', 'even', 'make', 'also', 'after', 'been', 'which'
+        ];
+        
+        const zhStopwords = [
+          '的', '了', '是', '在', '我', '你', '他', '她', '它', '这', '那', '和', '有', '无', 
+          '也', '就', '都', '而', '及', '与', '被', '让', '使', '等', '及', '关于', '对于', 
+          '一个', '这个', '那个', '软件', '应用', '使用', '感觉', '觉得', '希望', '如果',
+          '不能', '无法', '支持', '更新', '下载', '打开', '闪退', '因为', '所以', '但是'
+        ];
+
+        apps.forEach(appItem => {
+          appItem.reviews.forEach((rev: any) => {
+            if (rev.rating <= 3) {
+              const text = `${rev.title} ${rev.content}`;
+              
+              if (language === 'zh') {
+                // 中文滑动窗口分词 (提取 3 到 4 个字的中文短句短语)
+                const cleanText = text.replace(/[^\u4e00-\u9fa5]/g, ' ');
+                const segments = cleanText.split(/\s+/).filter(s => s.length >= 3);
+                
+                segments.forEach(seg => {
+                  for (let len of [3, 4]) {
+                    for (let i = 0; i <= seg.length - len; i++) {
+                      const phrase = seg.slice(i, i + len);
+                      // 排除包含常见停用词且未携带实际名词含义的短语
+                      if (!zhStopwords.some(sw => phrase.includes(sw) && phrase.length <= sw.length + 1)) {
+                        phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1;
+                      }
+                    }
+                  }
+                });
+              } else {
+                // 英文 N-Gram 分词 (2-gram & 3-gram)
+                const cleanText = text.replace(/[^a-zA-Z\s]/g, '').toLowerCase();
+                const words = cleanText.split(/\s+/).filter(w => w.length > 2);
+                
+                // 提取 2-gram
+                for (let i = 0; i < words.length - 1; i++) {
+                  const w1 = words[i];
+                  const w2 = words[i+1];
+                  if (!enStopwords.includes(w1) && !enStopwords.includes(w2)) {
+                    const phrase = `${w1} ${w2}`;
+                    phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1;
+                  }
+                }
+                // 提取 3-gram
+                for (let i = 0; i < words.length - 2; i++) {
+                  const w1 = words[i];
+                  const w2 = words[i+1];
+                  const w3 = words[i+2];
+                  if (!enStopwords.includes(w1) && !enStopwords.includes(w3)) {
+                    const phrase = `${w1} ${w2} ${w3}`;
+                    phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1;
+                  }
+                }
+              }
+            }
+          });
+        });
+
+        return Object.entries(phraseCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(e => ({ word: e[0], count: e[1] }));
+      };
+      
+      const topPainWords = extractPhrases(analyzedApps, lang);
+
+      // 6. 整理反向优化建议榜
+      const reverseOpportunities = analyzedApps
+        .filter((app: any) => app.ratingCount > 30 && app.rating <= 4.2)
+        .sort((a: any, b: any) => b.oppScore - a.oppScore)
+        .slice(0, 3)
+        .map((app: any) => {
+          // 挑选出该竞品最典型的痛点评论作为具体突破口
+          const coreComplaints = app.reviews
+            .filter((r: any) => r.rating <= 3)
+            .slice(0, 2)
+            .map((r: any) => ({
+              rating: r.rating,
+              title: r.title,
+              content: r.content
+            }));
+          return {
+            id: app.id,
+            name: app.name,
+            icon: app.icon,
+            rating: app.rating,
+            ratingCount: app.ratingCount,
+            oppScore: app.oppScore,
+            coreComplaints
+          };
+        });
 
       setAnalysisResults({
         query: isAppId ? appList[0].trackName : query,
@@ -249,7 +350,8 @@ export default function Sidebar() {
         avgNpi,
         topPainWords,
         apps: analyzedApps,
-        hints: hintsList
+        hints: hintsList,
+        reverseOpportunities
       });
 
     } catch (err: any) {
@@ -2194,7 +2296,7 @@ export default function Sidebar() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    <span>正在深度解析 AppStore 数据...</span>
+                    <span>正在解析数据 ({analysisProgress} / {analysisTotal})...</span>
                   </>
                 ) : (
                   <>
@@ -2252,7 +2354,7 @@ export default function Sidebar() {
                   {/* 核心痛点高频词 */}
                   {analysisResults.topPainWords.length > 0 && (
                     <div className="space-y-1.5 pt-1">
-                      <h4 className="text-[10px] font-semibold text-slate-400">用户主流诉求 & 痛点词频:</h4>
+                      <h4 className="text-[10px] font-semibold text-slate-400">用户主流诉求 & 痛点短语词频:</h4>
                       <div className="flex flex-wrap gap-1.5">
                         {analysisResults.topPainWords.map((item: any, idx: number) => (
                           <span 
@@ -2266,6 +2368,49 @@ export default function Sidebar() {
                     </div>
                   )}
                 </div>
+
+                {/* 反向突破雷达模块 */}
+                {analysisResults.reverseOpportunities && analysisResults.reverseOpportunities.length > 0 && (
+                  <div className="bg-gradient-to-br from-rose-950/20 to-slate-900/60 p-4 rounded-xl border border-rose-500/20 space-y-3 shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+                        <span>🚨 反向突围潜力榜 (差评吸金机会)</span>
+                      </h3>
+                      <span className="text-[9px] text-slate-500">寻找高下载但口碑低的产品进行降维打击</span>
+                    </div>
+
+                    <div className="space-y-3">
+                      {analysisResults.reverseOpportunities.map((opApp: any) => (
+                        <div key={opApp.id} className="bg-slate-950/50 p-3 rounded-lg border border-slate-900 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <img src={opApp.icon} className="w-6 h-6 rounded-md object-cover border border-slate-800" alt={opApp.name} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-200 truncate">{opApp.name}</span>
+                                <span className="text-[9px] text-rose-400 font-bold bg-rose-500/10 px-1 py-0.2 rounded">潜力指数: {opApp.oppScore}</span>
+                              </div>
+                              <p className="text-[9px] text-slate-500 flex justify-between pt-0.5">
+                                <span>评分: {opApp.rating.toFixed(1)} ★ ({opApp.ratingCount} 个评分)</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* 痛点突破口 */}
+                          {opApp.coreComplaints && opApp.coreComplaints.length > 0 && (
+                            <div className="space-y-1 bg-rose-500/5 p-2 rounded border border-rose-500/10">
+                              <span className="text-[9px] font-black text-rose-300 block">💡 致命痛点切入点 (有极大重构升级空间)：</span>
+                              {opApp.coreComplaints.map((c: any, cIdx: number) => (
+                                <div key={cIdx} className="text-[9.5px] leading-relaxed text-slate-400 pl-1 border-l border-rose-400/40 my-1">
+                                  <span className="font-bold text-rose-400">“{c.title}”</span> - {c.content.slice(0, 150)}{c.content.length > 150 ? '...' : ''}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* 2. SEO / ASO 搜索联想词树 */}
                 {analysisResults.hints.length > 0 && (
