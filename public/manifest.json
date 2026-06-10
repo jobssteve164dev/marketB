@@ -49,6 +49,8 @@
     "*://localhost/*",
     "*://seevoid.com/*",
     "*://*.seevoid.com/*",
-    "*://*.apple.com/*"
+    "*://*.apple.com/*",
+    "https://open-vsx.org/*",
+    "https://chromewebstore.google.com/*"
   ]
 }

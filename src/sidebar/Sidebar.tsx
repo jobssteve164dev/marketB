@@ -22,14 +22,490 @@ export default function Sidebar() {
   // 视图 Tab 切换
   const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'settings' | 'analysis'>('search');
   
-  // AppStore 分析 Tab 的专属状态
+  // AppStore / 插件分析 Tab 的专属状态
+  const [analysisMode, setAnalysisMode] = useState<'appstore' | 'openvsx' | 'chrome'>('appstore');
   const [analysisQuery, setAnalysisQuery] = useState('');
+  const [analysisKeywords, setAnalysisKeywords] = useState('');
+  const [analysisCategory, setAnalysisCategory] = useState('');
   const [analysisCountry, setAnalysisCountry] = useState('us');
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisTotal, setAnalysisTotal] = useState(0);
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  // 运行 Open VSX 插件市场分析与 ASO 排名评估
+  const handleOpenVSXAnalysis = async () => {
+    const query = analysisQuery.trim();
+    if (!query) {
+      setAnalysisError('请输入插件名称/ID（例如: meta.pyrefly）');
+      return;
+    }
+    
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    setAnalysisResults(null);
+    setAnalysisProgress(0);
+    setAnalysisTotal(1);
+
+    try {
+      // 1. 解析 namespace 和 name
+      let namespace = '';
+      let name = '';
+      if (query.includes('.') || query.includes('/')) {
+        const parts = query.split(/[\.\/]/);
+        namespace = parts[0].trim();
+        name = parts[1].trim();
+      } else {
+        const searchUrl = `https://open-vsx.org/api/-/search?q=${encodeURIComponent(query)}&size=1`;
+        const res = await fetch(searchUrl);
+        const data = await res.json();
+        if (data.extensions && data.extensions.length > 0) {
+          namespace = data.extensions[0].namespace;
+          name = data.extensions[0].name;
+        } else {
+          throw new Error('未在 Open VSX 市场中找到匹配的插件，请提供精确的 namespace.name');
+        }
+      }
+
+      // 2. 获取插件详情
+      const detailUrl = `https://open-vsx.org/api/${namespace}/${name}`;
+      const detailRes = await fetch(detailUrl);
+      if (!detailRes.ok) {
+        throw new Error(`无法获取插件详情: ${namespace}.${name}`);
+      }
+      const extDetail = await detailRes.json();
+      
+      const kws = analysisKeywords
+        .split(/[,，]/)
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+
+      const totalSteps = 1 + kws.length + 1;
+      setAnalysisTotal(totalSteps);
+      setAnalysisProgress(1);
+
+      // 3. 关键词排名分析
+      const kwResults = [];
+      for (const kw of kws) {
+        try {
+          const kwSearchUrl = `https://open-vsx.org/api/-/search?q=${encodeURIComponent(kw)}&size=100`;
+          const kwRes = await fetch(kwSearchUrl);
+          const kwData = await kwRes.json();
+          const list = kwData.extensions || [];
+          
+          let rank = -1;
+          for (let i = 0; i < list.length; i++) {
+            if (list[i].namespace.toLowerCase() === namespace.toLowerCase() && list[i].name.toLowerCase() === name.toLowerCase()) {
+              rank = i + 1;
+              break;
+            }
+          }
+
+          const top3Competitors = list.slice(0, 3).map((comp: any) => ({
+            name: comp.displayName || comp.name,
+            id: `${comp.namespace}.${comp.name}`,
+            downloads: comp.downloadCount || 0,
+            rating: comp.averageRating || 0,
+            icon: comp.files?.icon || ''
+          }));
+
+          kwResults.push({
+            keyword: kw,
+            rank: rank,
+            top3: top3Competitors
+          });
+        } catch (err) {
+          console.error(`Error querying keyword ${kw}:`, err);
+          kwResults.push({ keyword: kw, rank: -1, top3: [] });
+        } finally {
+          setAnalysisProgress(prev => prev + 1);
+        }
+      }
+
+      // 4. 获取分类下载排名与热门插件
+      let categoryRank = -1;
+      let categoryTotal = 0;
+      let categoryTop5: any[] = [];
+      const primaryCategory = (extDetail.categories && extDetail.categories.length > 0) 
+        ? extDetail.categories[0] 
+        : (analysisCategory.trim() || 'Other');
+
+      try {
+        const catUrl = `https://open-vsx.org/api/-/search?category=${encodeURIComponent(primaryCategory)}&sortBy=downloadCount&size=100`;
+        const catRes = await fetch(catUrl);
+        const catData = await catRes.json();
+        const catList = catData.extensions || [];
+        categoryTotal = catData.totalSize || catList.length;
+
+        for (let i = 0; i < catList.length; i++) {
+          if (catList[i].namespace.toLowerCase() === namespace.toLowerCase() && catList[i].name.toLowerCase() === name.toLowerCase()) {
+            categoryRank = i + 1;
+            break;
+          }
+        }
+
+        categoryTop5 = catList.slice(0, 5).map((comp: any) => ({
+          name: comp.displayName || comp.name,
+          id: `${comp.namespace}.${comp.name}`,
+          downloads: comp.downloadCount || 0,
+          rating: comp.averageRating || 0,
+          icon: comp.files?.icon || ''
+        }));
+      } catch (err) {
+        console.error('Category analysis failed:', err);
+      } finally {
+        setAnalysisProgress(prev => prev + 1);
+      }
+
+      // 5. 科学算法指标计算
+      let sumVisibility = 0;
+      kwResults.forEach(item => {
+        const r = item.rank;
+        let v = 0;
+        if (r === 1) v = 100;
+        else if (r >= 2 && r <= 3) v = 95;
+        else if (r >= 4 && r <= 10) v = 90 - 5 * (r - 4);
+        else if (r >= 11 && r <= 30) v = 48 - 1.5 * (r - 11);
+        else if (r >= 31 && r <= 100) v = 19 - 0.2 * (r - 31);
+        else v = 0;
+        sumVisibility += v;
+      });
+      const aspi = kwResults.length > 0 ? Math.round(sumVisibility / kwResults.length) : 0;
+
+      let downloadPercentile = 50;
+      const targetDownloads = extDetail.downloadCount || 0;
+      if (categoryRank > 0) {
+        downloadPercentile = Math.round(((categoryTotal - categoryRank) / categoryTotal) * 100);
+      } else {
+        if (targetDownloads > 1000000) downloadPercentile = 98;
+        else if (targetDownloads > 100000) downloadPercentile = 90;
+        else if (targetDownloads > 10000) downloadPercentile = 75;
+        else if (targetDownloads > 1000) downloadPercentile = 50;
+        else downloadPercentile = 20;
+      }
+      
+      const ratingHealth = Math.round((extDetail.averageRating || 0) * 20);
+      const mcoi = Math.round(0.4 * downloadPercentile + 0.4 * ratingHealth + 0.2 * aspi);
+
+      const optimizationActions = [];
+      const titleLower = (extDetail.displayName || '').toLowerCase();
+
+      const missingTitleKws = kws.filter(k => !titleLower.includes(k.toLowerCase()));
+      if (missingTitleKws.length > 0) {
+        optimizationActions.push({
+          type: 'danger',
+          title: 'ASO 标题权重缺失',
+          content: `核心检索词 [${missingTitleKws.join(', ')}] 未在您的插件显示名称 (displayName) 中出现。建议在不破坏品牌感的情况下，把主检索词融入 displayName 中（例如: ${extDetail.displayName} - ${missingTitleKws[0] || ''}）。`
+        });
+      } else if (kws.length > 0) {
+        optimizationActions.push({
+          type: 'success',
+          title: 'ASO 标题检索词覆盖完美',
+          content: `您的核心监测词已成功融入插件名称中，这提供了最高的搜索推荐基础权重。`
+        });
+      }
+
+      const borderLineKws = kwResults.filter(item => item.rank > 10 && item.rank <= 30);
+      if (borderLineKws.length > 0) {
+        optimizationActions.push({
+          type: 'warning',
+          title: '临界流量突破建议',
+          content: `关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 当前排名在 11-30 名之间。建议在插件 tags 列表和 description 正文开头增加这些词的出现频次，并在下个版本更新日志中描述该功能，以使其冲入前 10。`
+        });
+      }
+
+      if (extDetail.averageRating && extDetail.averageRating < 4.3) {
+        optimizationActions.push({
+          type: 'danger',
+          title: '评分健康度落后',
+          content: `当前平均评分 ${extDetail.averageRating.toFixed(1)} 低于同分类优质插件的水位 (>= 4.5)。请重点查看用户负面反馈，降低故障率，以避免搜索排名被算法降权。`
+        });
+      } else if (targetDownloads > 100 && (extDetail.reviewCount || 0) === 0) {
+        optimizationActions.push({
+          type: 'warning',
+          title: '引导好评机制缺失',
+          content: `您的下载量已达 ${targetDownloads}，但评价数为 0。建议引导活跃用户留下好评，能大幅拉升 ASO 综合权重。`
+        });
+      }
+
+      if (categoryTop5.length > 0 && targetDownloads < categoryTop5[0].downloads) {
+        const gap = categoryTop5[0].downloads - targetDownloads;
+        optimizationActions.push({
+          type: 'info',
+          title: '分类领跑者追赶度量',
+          content: `当前分类 "${primaryCategory}" 的领跑者 "${categoryTop5[0].name}" 拥有 ${categoryTop5[0].downloads.toLocaleString()} 下载量。您与它相差 ${gap.toLocaleString()} 次下载。`
+        });
+      }
+
+      setAnalysisResults({
+        mode: 'openvsx',
+        query: `${namespace}.${name}`,
+        displayName: extDetail.displayName || name,
+        description: extDetail.description || '',
+        icon: extDetail.files?.icon || '',
+        downloads: targetDownloads,
+        rating: extDetail.averageRating || 0,
+        reviewCount: extDetail.reviewCount || 0,
+        version: extDetail.version || '0.0.1',
+        category: primaryCategory,
+        aspi,
+        mcoi,
+        downloadPercentile,
+        kwResults,
+        categoryRank,
+        categoryTotal,
+        categoryTop5,
+        actions: optimizationActions
+      });
+
+    } catch (err: any) {
+      console.error(err);
+      setAnalysisError(err.message || '分析过程中发生未知错误，请重试');
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
+  // 运行 Chrome Web Store 插件市场分析与 ASO 排名评估
+  const handleChromeAnalysis = async () => {
+    const id = analysisQuery.trim();
+    if (!id || id.length !== 32 || !/^[a-z]+$/.test(id)) {
+      setAnalysisError('请输入 Chrome 插件的 32 位唯一 ID（例如: degimalgkelhibdpeofjmkmhdfneidca）');
+      return;
+    }
+    
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    setAnalysisResults(null);
+    setAnalysisProgress(0);
+
+    const kws = analysisKeywords
+      .split(/[,，]/)
+      .map(k => k.trim())
+      .filter(k => k.length > 0);
+
+    const totalSteps = 1 + kws.length;
+    setAnalysisTotal(totalSteps);
+
+    try {
+      // 1. 获取插件详情页并提取元数据
+      const detailUrl = `https://chromewebstore.google.com/detail/placeholder/${id}`;
+      const detailRes = await fetch(detailUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      if (!detailRes.ok) {
+        throw new Error('未找到该 Chrome 插件，请确认插件 ID 是否已发布且公开。');
+      }
+      const htmlText = await detailRes.text();
+      setAnalysisProgress(1);
+
+      // 解析详情
+      let displayName = '';
+      const titleMatch = htmlText.match(/<title>([^<]+)<\/title>/i);
+      if (titleMatch) {
+        displayName = titleMatch[1].replace(/\s*-\s*Chrome\s*(Web\s*Store|应用商店)/i, '').trim();
+      } else {
+        displayName = '未命名插件';
+      }
+
+      let downloads = 0;
+      const usersMatch = htmlText.match(/([\d,\.\s]+)\+?\s*users/i) || htmlText.match(/([\d,\.\s]+)\+?\s*位用户/i);
+      if (usersMatch) {
+        downloads = parseInt(usersMatch[1].replace(/[,.\s]/g, ''), 10) || 0;
+      }
+
+      let rating = 0;
+      const ratingMatch = htmlText.match(/Average rating\s+([\d\.]+)\s+out of/i) || htmlText.match(/aria-label="Average rating\s+([\d\.]+)/i);
+      if (ratingMatch) {
+        rating = parseFloat(ratingMatch[1]) || 0;
+      }
+
+      let reviewCount = 0;
+      const ratingsMatch = htmlText.match(/([\d,]+)\s+ratings/i) || htmlText.match(/([\d,]+)\s+个评分/i);
+      if (ratingsMatch) {
+        reviewCount = parseInt(ratingsMatch[1].replace(/,/g, ''), 10) || 0;
+      }
+
+      let icon = '';
+      const ogImgMatch = htmlText.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || htmlText.match(/<meta\s+content="([^"]+)"\s+property="og:image"/i);
+      if (ogImgMatch) {
+        icon = ogImgMatch[1];
+      }
+
+      let primaryCategory = 'Other';
+      const cats = ['Productivity', 'Developer Tools', 'Workflow', 'Planning', 'Accessibility', 'Fun', 'Social', 'Shopping', 'Lifestyle', 'News', 'Education', 'Utilities', 'Communication', 'Photos'];
+      for (const cat of cats) {
+        if (htmlText.toLowerCase().includes(cat.toLowerCase())) {
+          primaryCategory = cat;
+          break;
+        }
+      }
+
+      // 2. 关键词搜索排名抓取
+      const kwResults = [];
+      for (const kw of kws) {
+        try {
+          const kwUrl = `https://chromewebstore.google.com/search/${encodeURIComponent(kw)}`;
+          const kwRes = await fetch(kwUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+          });
+          const kwHtml = await kwRes.text();
+          
+          const foundIds: string[] = [];
+          const slugMap: Record<string, string> = {}; 
+          
+          let match;
+          const regexForLoop = /\/detail\/([^"/]+)\/([a-z]{32})/gi;
+          while ((match = regexForLoop.exec(kwHtml)) !== null) {
+            const competitorSlug = match[1];
+            const competitorId = match[2].toLowerCase();
+            if (!foundIds.includes(competitorId)) {
+              foundIds.push(competitorId);
+              slugMap[competitorId] = competitorSlug;
+            }
+          }
+
+          let rank = -1;
+          const userIdx = foundIds.indexOf(id.toLowerCase());
+          if (userIdx >= 0) {
+            rank = userIdx + 1;
+          }
+
+          const top3Competitors = foundIds.slice(0, 3).map((compId) => {
+            const rawSlug = slugMap[compId] || '';
+            const cleanName = rawSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            return {
+              name: cleanName || compId,
+              id: compId,
+              downloads: 0,
+              rating: 0,
+              icon: ''
+            };
+          });
+
+          kwResults.push({
+            keyword: kw,
+            rank: rank,
+            top3: top3Competitors
+          });
+        } catch (err) {
+          console.error(`CWS keyword ${kw} query failed:`, err);
+          kwResults.push({ keyword: kw, rank: -1, top3: [] });
+        } finally {
+          setAnalysisProgress(prev => prev + 1);
+        }
+      }
+
+      // 3. 算法计算
+      let sumVisibility = 0;
+      kwResults.forEach(item => {
+        const r = item.rank;
+        let v = 0;
+        if (r === 1) v = 100;
+        else if (r >= 2 && r <= 3) v = 95;
+        else if (r >= 4 && r <= 10) v = 90 - 5 * (r - 4);
+        else if (r >= 11 && r <= 30) v = 48 - 1.5 * (r - 11);
+        else if (r >= 31 && r <= 100) v = 19 - 0.2 * (r - 31);
+        else v = 0;
+        sumVisibility += v;
+      });
+      const aspi = kwResults.length > 0 ? Math.round(sumVisibility / kwResults.length) : 0;
+
+      let downloadPercentile = 20;
+      if (downloads > 100000) downloadPercentile = 95;
+      else if (downloads > 10000) downloadPercentile = 85;
+      else if (downloads > 1000) downloadPercentile = 65;
+      else if (downloads > 100) downloadPercentile = 45;
+      else if (downloads > 10) downloadPercentile = 25;
+
+      const ratingHealth = rating > 0 ? Math.round(rating * 20) : 60;
+      const mcoi = Math.round(0.4 * downloadPercentile + 0.4 * ratingHealth + 0.2 * aspi);
+
+      const optimizationActions = [];
+      const titleLower = displayName.toLowerCase();
+
+      const missingTitleKws = kws.filter(k => !titleLower.includes(k.toLowerCase()));
+      if (missingTitleKws.length > 0) {
+        optimizationActions.push({
+          type: 'danger',
+          title: 'ASO 检索词覆盖警告',
+          content: `核心监测词 [${missingTitleKws.join(', ')}] 未在您的插件标题中包含。建议在不破坏品牌感的情况下，将核心检索词植入您的插件显示名称中。`
+        });
+      } else if (kws.length > 0) {
+        optimizationActions.push({
+          type: 'success',
+          title: 'ASO 标题检索词状态良好',
+          content: `您的核心监测词已很好地包含在插件显示名称中。`
+        });
+      }
+
+      const borderLineKws = kwResults.filter(item => item.rank > 10 && item.rank <= 30);
+      if (borderLineKws.length > 0) {
+        optimizationActions.push({
+          type: 'warning',
+          title: '搜索临界区突破方案',
+          content: `您的插件在关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 的搜索结果中排在 11-30 名。建议在详细描述 (Store Listing Description) 的前几句合理增加这些词的出现频次，以便有效冲入搜索前 10。`
+        });
+      }
+
+      if (rating > 0 && rating < 4.2) {
+        optimizationActions.push({
+          type: 'danger',
+          title: '转化率流失警告 (评分偏低)',
+          content: `当前评分 ${rating.toFixed(1)} 偏低。这会影响详情页转化率和自然搜索排名，建议针对用户负面反馈打磨体验。`
+        });
+      } else if (downloads > 100 && reviewCount === 0) {
+        optimizationActions.push({
+          type: 'warning',
+          title: '缺少社交共鸣 (0 ratings)',
+          content: `用户已有 ${downloads} 人，但评分为 0。建议在插件内引导活跃用户留下评论以突破冷启动瓶颈。`
+        });
+      }
+
+      setAnalysisResults({
+        mode: 'chrome',
+        query: id,
+        displayName,
+        description: '',
+        icon: icon || '',
+        downloads,
+        rating,
+        reviewCount,
+        version: '',
+        category: primaryCategory,
+        aspi,
+        mcoi,
+        downloadPercentile,
+        kwResults,
+        categoryRank: -1,
+        categoryTotal: 0,
+        categoryTop5: [],
+        actions: optimizationActions
+      });
+
+    } catch (err: any) {
+      console.error(err);
+      setAnalysisError(err.message || '分析过程中发生未知错误，请重试');
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
+  const handleAnalysisSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (analysisMode === 'appstore') {
+      handleAppStoreAnalysis();
+    } else if (analysisMode === 'openvsx') {
+      handleOpenVSXAnalysis();
+    } else if (analysisMode === 'chrome') {
+      handleChromeAnalysis();
+    }
+  };
 
   // 翻译功能专属状态
   const [enableTranslation, setEnableTranslation] = useState(false);
@@ -41,6 +517,7 @@ export default function Sidebar() {
 
   // 记录上次检测到的标签页 URL，用于切换关键词或页面时清空抓取列表
   const [lastUrl, setLastUrl] = useState('');
+
 
   // 运行苹果 AppStore 的商业可行性与 ASO 关键词分析（无付费 API 纯净本地版）
   const handleAppStoreAnalysis = async (e?: React.FormEvent) => {
@@ -2325,30 +2802,81 @@ export default function Sidebar() {
         {/* VIEW 5: AppStore ASO 与商业可行性分析 */}
         {activeTab === 'analysis' && (
           <div className="flex flex-col h-full space-y-4 min-h-0 overflow-y-auto pr-1">
+            {/* 模式选择 Tab */}
+            <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-850 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setAnalysisMode('appstore'); setAnalysisResults(null); setAnalysisError(null); }}
+                className={`py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'appstore' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                🍎 AppStore 分析
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAnalysisMode('openvsx'); setAnalysisResults(null); setAnalysisError(null); }}
+                className={`py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'openvsx' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                📦 OpenVSX 插件
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAnalysisMode('chrome'); setAnalysisResults(null); setAnalysisError(null); }}
+                className={`py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'chrome' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                🌐 Chrome 插件
+              </button>
+            </div>
+
             {/* 搜索控制区域 */}
-            <form onSubmit={handleAppStoreAnalysis} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
-              <h3 className="text-xs font-semibold text-slate-300">🍎 AppStore 市场与 SEO 探针</h3>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="输入关键词（如: habit tracker）或 App ID"
-                  value={analysisQuery}
-                  onChange={(e) => setAnalysisQuery(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
-                />
-                <select
-                  value={analysisCountry}
-                  onChange={(e) => setAnalysisCountry(e.target.value)}
-                  className="px-2 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
-                >
-                  <option value="us">美国 🇺🇸</option>
-                  <option value="cn">中国 🇨🇳</option>
-                  <option value="jp">日本 🇯🇵</option>
-                  <option value="gb">英国 🇬🇧</option>
-                  <option value="tw">中国台湾 🇹🇼</option>
-                  <option value="hk">中国香港 🇭🇰</option>
-                </select>
+            <form onSubmit={handleAnalysisSubmit} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+              <h3 className="text-xs font-semibold text-slate-300">
+                {analysisMode === 'appstore' && '🍎 AppStore 市场与 ASO 探针'}
+                {analysisMode === 'openvsx' && '📦 OpenVSX 插件 ASO 排名雷达'}
+                {analysisMode === 'chrome' && '🌐 Chrome 插件 ASO 排名雷达'}
+              </h3>
+              
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder={
+                      analysisMode === 'appstore' 
+                        ? '输入关键词或 App ID' 
+                        : analysisMode === 'openvsx' 
+                          ? '输入插件 ID (如: meta.pyrefly)' 
+                          : '输入插件 32 位 ID (如: degimalg...'
+                    }
+                    value={analysisQuery}
+                    onChange={(e) => setAnalysisQuery(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
+                  />
+                  {analysisMode === 'appstore' && (
+                    <select
+                      value={analysisCountry}
+                      onChange={(e) => setAnalysisCountry(e.target.value)}
+                      className="px-2 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="us">美国 🇺🇸</option>
+                      <option value="cn">中国 🇨🇳</option>
+                      <option value="jp">日本 🇯🇵</option>
+                      <option value="gb">英国 🇬🇧</option>
+                      <option value="tw">中国台湾 🇹🇼</option>
+                      <option value="hk">中国香港 🇭🇰</option>
+                    </select>
+                  )}
+                </div>
+
+                {analysisMode !== 'appstore' && (
+                  <input
+                    type="text"
+                    placeholder="核心监测关键词 (用逗号隔开，如: git, git graph)"
+                    value={analysisKeywords}
+                    onChange={(e) => setAnalysisKeywords(e.target.value)}
+                    className="px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
+                  />
+                )}
               </div>
+
               <button
                 type="submit"
                 disabled={analysisLoading}
@@ -2364,7 +2892,7 @@ export default function Sidebar() {
                   </>
                 ) : (
                   <>
-                    <span>🚀 开始真实商业化评估</span>
+                    <span>🚀 开始实时商业化评估</span>
                   </>
                 )}
               </button>
@@ -2378,176 +2906,341 @@ export default function Sidebar() {
 
             {/* 分析结果展示区 */}
             {analysisResults ? (
-              <div className="space-y-4 pb-4">
-                {/* 1. 赛道宏观仪表盘 */}
-                <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 p-4 rounded-2xl border border-slate-800/80 space-y-4 shrink-0">
-                  <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1">
-                    🎯 赛道洞察: <span className="text-indigo-400">"{analysisResults.query}"</span>
-                  </h3>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col justify-between">
-                      <span className="text-[10px] text-slate-400">平均付费意愿 (WTP)</span>
-                      <div className="flex items-baseline gap-1 mt-1.5">
-                        <span className="text-2xl font-black text-indigo-400">{analysisResults.avgWtp}</span>
-                        <span className="text-[10px] text-slate-500">/ 10</span>
+              analysisResults.mode && analysisResults.mode !== 'appstore' ? (
+                // 插件分析报告 (OpenVSX 和 Chrome)
+                <div className="space-y-4 pb-4">
+                  {/* 1. 插件基础摘要 */}
+                  <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 flex items-start gap-3 shrink-0">
+                    {analysisResults.icon ? (
+                      <img src={analysisResults.icon} className="w-12 h-12 rounded-xl object-cover border border-slate-800" alt="" />
+                    ) : (
+                      <div className="w-12 h-12 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center text-xl shrink-0">
+                        {analysisResults.mode === 'chrome' ? '🧩' : '📦'}
                       </div>
-                      <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-                        <div 
-                          className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full" 
-                          style={{ width: `${analysisResults.avgWtp * 10}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col justify-between">
-                      <span className="text-[10px] text-slate-400">用户痛点紧迫度 (NPI)</span>
-                      <div className="flex items-baseline gap-1 mt-1.5">
-                        <span className="text-2xl font-black text-violet-400">{analysisResults.avgNpi}</span>
-                        <span className="text-[10px] text-slate-500">/ 10</span>
-                      </div>
-                      <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-                        <div 
-                          className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full" 
-                          style={{ width: `${analysisResults.avgNpi * 10}%` }}
-                        />
+                    )}
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <h3 className="text-xs font-bold text-slate-100 truncate">{analysisResults.displayName}</h3>
+                      <p className="text-[10px] text-slate-400 truncate font-mono">{analysisResults.query}</p>
+                      <div className="flex flex-wrap gap-2 text-[9px] text-slate-500">
+                        <span>下载/用户: <strong className="text-slate-300">{(analysisResults.downloads || 0).toLocaleString()}</strong></span>
+                        <span>评分: <strong className="text-slate-300">{(analysisResults.rating || 0).toFixed(1)} ★</strong> ({analysisResults.reviewCount || 0})</span>
+                        <span>分类: <strong className="text-indigo-400">{analysisResults.category}</strong></span>
                       </div>
                     </div>
                   </div>
 
-                  {/* 核心痛点高频词 */}
-                  {analysisResults.topPainWords.length > 0 && (
-                    <div className="space-y-1.5 pt-1">
-                      <h4 className="text-[10px] font-semibold text-slate-400">用户主流诉求 & 痛点短语词频:</h4>
-                      <div className="flex flex-wrap gap-1.5">
-                        {analysisResults.topPainWords.map((item: any, idx: number) => (
-                          <span 
-                            key={idx} 
-                            className="px-2 py-0.5 bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded text-[9px] font-medium"
-                          >
-                            #{item.word} ({item.count})
-                          </span>
+                  {/* 2. 双维度核心雷达指标 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* ASPI 搜索能见度 */}
+                    <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between relative overflow-hidden">
+                      <div>
+                        <span className="text-[10px] text-slate-400">ASO 搜索能见度 (ASPI)</span>
+                        <div className="flex items-baseline gap-1 mt-1">
+                          <span className="text-2xl font-black text-indigo-400">{analysisResults.aspi}</span>
+                          <span className="text-[10px] text-slate-500">/ 100</span>
+                        </div>
+                      </div>
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full" 
+                          style={{ width: `${analysisResults.aspi}%` }}
+                        />
+                      </div>
+                      {/* 等级标签 */}
+                      <span className="absolute top-2 right-2 text-xl font-black opacity-10 text-indigo-400">
+                        {analysisResults.aspi >= 90 ? 'S' : analysisResults.aspi >= 75 ? 'A' : analysisResults.aspi >= 50 ? 'B' : 'C'}
+                      </span>
+                    </div>
+
+                    {/* MCOI 市场竞争力 */}
+                    <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between relative overflow-hidden">
+                      <div>
+                        <span className="text-[10px] text-slate-400">市场竞争力指数 (MCOI)</span>
+                        <div className="flex items-baseline gap-1 mt-1">
+                          <span className="text-2xl font-black text-violet-400">{analysisResults.mcoi}</span>
+                          <span className="text-[10px] text-slate-500">/ 100</span>
+                        </div>
+                      </div>
+                      <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full" 
+                          style={{ width: `${analysisResults.mcoi}%` }}
+                        />
+                      </div>
+                      <span className="absolute top-2 right-2 text-xl font-black opacity-10 text-violet-400">
+                        {analysisResults.mcoi >= 90 ? 'S' : analysisResults.mcoi >= 75 ? 'A' : analysisResults.mcoi >= 50 ? 'B' : 'C'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 3. 关键词搜索排名 & 竞品 Benchmark */}
+                  {analysisResults.kwResults && analysisResults.kwResults.length > 0 && (
+                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+                      <h3 className="text-xs font-bold text-slate-200">🔍 关键词搜索排名 & ASO 标杆对比</h3>
+                      <div className="space-y-3">
+                        {analysisResults.kwResults.map((kwRes: any, idx: number) => (
+                          <div key={idx} className="bg-slate-950/60 p-3 rounded-lg border border-slate-850 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-200">#{kwRes.keyword}</span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                kwRes.rank === 1 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                kwRes.rank > 1 && kwRes.rank <= 10 ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' :
+                                kwRes.rank > 10 && kwRes.rank <= 30 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                              }`}>
+                                排名: {kwRes.rank > 0 ? `第 ${kwRes.rank} 名` : '未上榜 (>100)'}
+                              </span>
+                            </div>
+
+                            {/* Top 3 Competitors */}
+                            {kwRes.top3 && kwRes.top3.length > 0 && (
+                              <div className="space-y-1">
+                                <span className="text-[9px] font-semibold text-slate-500 block">该检索词下 Top 3 流量主:</span>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {kwRes.top3.map((comp: any, cidx: number) => (
+                                    <div key={cidx} className="bg-slate-900/80 p-1.5 rounded border border-slate-850 flex flex-col justify-between text-[9px] min-w-0">
+                                      <span className="text-slate-300 font-bold truncate" title={comp.name}>{comp.name}</span>
+                                      {comp.downloads > 0 && (
+                                        <span className="text-slate-500 truncate">{comp.downloads.toLocaleString()} dl</span>
+                                      )}
+                                      {comp.downloads === 0 && (
+                                        <span className="text-slate-500 font-mono">No. {cidx+1}</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. 分类下载排名与领跑者标杆 */}
+                  {analysisResults.mode === 'openvsx' && analysisResults.categoryTop5 && analysisResults.categoryTop5.length > 0 && (
+                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold text-slate-200">📊 分类下载排名</h3>
+                        <span className="text-[10px] text-slate-400 font-semibold">
+                          {analysisResults.categoryRank > 0 ? `第 ${analysisResults.categoryRank} 名 / 共 ${analysisResults.categoryTotal} 个` : `前 100 未上榜 / 共 ${analysisResults.categoryTotal} 个`}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1 bg-slate-950/60 p-2.5 rounded-lg border border-slate-850">
+                        <span className="text-[9px] font-semibold text-slate-500 block">分类内热门领跑者 (Benchmark):</span>
+                        <div className="space-y-1.5">
+                          {analysisResults.categoryTop5.map((comp: any, cidx: number) => (
+                            <div key={cidx} className="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-900/50 pb-1 last:border-b-0 last:pb-0">
+                              <span className="font-bold text-slate-300 truncate max-w-[140px]">{cidx+1}. {comp.name}</span>
+                              <span className="text-indigo-400 shrink-0">{comp.downloads.toLocaleString()} 下载</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 5. 智能科学优化行动方案 */}
+                  {analysisResults.actions && analysisResults.actions.length > 0 && (
+                    <div className="bg-gradient-to-br from-indigo-950/20 to-slate-900/60 p-4 rounded-xl border border-indigo-500/20 space-y-3 shrink-0">
+                      <h3 className="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
+                        <span>💡 ASO & 插件竞争力优化路线</span>
+                      </h3>
+                      
+                      <div className="space-y-3">
+                        {analysisResults.actions.map((act: any, idx: number) => (
+                          <div key={idx} className={`p-3 rounded-lg border text-xs leading-relaxed ${
+                            act.type === 'danger' ? 'bg-rose-500/5 border-rose-500/10 text-rose-300' :
+                            act.type === 'warning' ? 'bg-amber-500/5 border-amber-500/10 text-amber-300' :
+                            act.type === 'success' ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-300' :
+                            'bg-slate-950/50 border-slate-850 text-slate-300'
+                          }`}>
+                            <span className="font-bold block pb-1">⚡ {act.title}：</span>
+                            {act.content}
+                          </div>
                         ))}
                       </div>
                     </div>
                   )}
                 </div>
+              ) : (
+                // 原有 AppStore 分析结果
+                <div className="space-y-4 pb-4">
+                  {/* 1. 赛道宏观仪表盘 */}
+                  <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 p-4 rounded-2xl border border-slate-800/80 space-y-4 shrink-0">
+                    <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1">
+                      🎯 赛道洞察: <span className="text-indigo-400">"{analysisResults.query}"</span>
+                    </h3>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col justify-between">
+                        <span className="text-[10px] text-slate-400">平均付费意愿 (WTP)</span>
+                        <div className="flex items-baseline gap-1 mt-1.5">
+                          <span className="text-2xl font-black text-indigo-400">{analysisResults.avgWtp}</span>
+                          <span className="text-[10px] text-slate-500">/ 10</span>
+                        </div>
+                        <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                          <div 
+                            className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full" 
+                            style={{ width: `${analysisResults.avgWtp * 10}%` }}
+                          />
+                        </div>
+                      </div>
 
-                {/* 反向突破雷达模块 */}
-                {analysisResults.reverseOpportunities && analysisResults.reverseOpportunities.length > 0 && (
-                  <div className="bg-gradient-to-br from-rose-950/20 to-slate-900/60 p-4 rounded-xl border border-rose-500/20 space-y-3 shrink-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
-                        <span>🚨 反向突围潜力榜 (差评吸金机会)</span>
-                      </h3>
-                      <span className="text-[9px] text-slate-500">寻找高下载但口碑低的产品进行降维打击</span>
+                      <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col justify-between">
+                        <span className="text-[10px] text-slate-400">用户痛点紧迫度 (NPI)</span>
+                        <div className="flex items-baseline gap-1 mt-1.5">
+                          <span className="text-2xl font-black text-violet-400">{analysisResults.avgNpi}</span>
+                          <span className="text-[10px] text-slate-500">/ 10</span>
+                        </div>
+                        <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                          <div 
+                            className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full" 
+                            style={{ width: `${analysisResults.avgNpi * 10}%` }}
+                          />
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="space-y-3">
-                      {analysisResults.reverseOpportunities.map((opApp: any) => (
-                        <div key={opApp.id} className="bg-slate-950/50 p-3 rounded-lg border border-slate-900 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <img src={opApp.icon} className="w-6 h-6 rounded-md object-cover border border-slate-800" alt={opApp.name} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-1.5">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="text-xs font-bold text-slate-200 truncate">{opApp.name}</span>
-                                  {opApp.url && (
-                                    <a
-                                      href={opApp.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-indigo-400 hover:text-indigo-300 text-[10px] shrink-0 font-semibold"
-                                      title="在 App Store 中打开"
-                                    >
-                                      ↗
-                                    </a>
-                                  )}
-                                </div>
-                                <span className="text-[9px] text-rose-400 font-bold bg-rose-500/10 px-1 py-0.2 rounded shrink-0">潜力指数: {opApp.oppScore}</span>
-                              </div>
-                              <p className="text-[9px] text-slate-500 flex justify-between pt-0.5">
-                                <span>评分: {opApp.rating.toFixed(1)} ★ ({opApp.ratingCount} 个评分)</span>
-                              </p>
-                            </div>
-                          </div>
+                    {/* 核心痛点高频词 */}
+                    {analysisResults.topPainWords.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <h4 className="text-[10px] font-semibold text-slate-400">用户主流诉求 & 痛点短语词频:</h4>
+                        <div className="flex flex-wrap gap-1.5">
+                          {analysisResults.topPainWords.map((item: any, idx: number) => (
+                            <span 
+                              key={idx} 
+                              className="px-2 py-0.5 bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded text-[9px] font-medium"
+                            >
+                              #{item.word} ({item.count})
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                          {/* 痛点突破口 */}
-                          {opApp.coreComplaints && opApp.coreComplaints.length > 0 && (
-                            <div className="space-y-1 bg-rose-500/5 p-2 rounded border border-rose-500/10">
-                              <span className="text-[9px] font-black text-rose-300 block">💡 致命痛点切入点 (有极大重构升级空间)：</span>
-                              {opApp.coreComplaints.map((c: any, cIdx: number) => (
-                                <div key={cIdx} className="text-[9.5px] leading-relaxed text-slate-400 pl-1 border-l border-rose-400/40 my-1">
-                                  <span className="font-bold text-rose-400">
-                                    “<TranslatedText 
-                                      text={c.title} 
+                  {/* 反向突破雷达模块 */}
+                  {analysisResults.reverseOpportunities && analysisResults.reverseOpportunities.length > 0 && (
+                    <div className="bg-gradient-to-br from-rose-950/20 to-slate-900/60 p-4 rounded-xl border border-rose-500/20 space-y-3 shrink-0">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+                          <span>🚨 反向突围潜力榜 (差评吸金机会)</span>
+                        </h3>
+                        <span className="text-[9px] text-slate-500">寻找高下载但口碑低的产品进行降维打击</span>
+                      </div>
+
+                      <div className="space-y-3">
+                        {analysisResults.reverseOpportunities.map((opApp: any) => (
+                          <div key={opApp.id} className="bg-slate-950/50 p-3 rounded-lg border border-slate-900 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <img src={opApp.icon} className="w-6 h-6 rounded-md object-cover border border-slate-800" alt={opApp.name} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-xs font-bold text-slate-200 truncate">{opApp.name}</span>
+                                    {opApp.url && (
+                                      <a
+                                        href={opApp.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-indigo-400 hover:text-indigo-300 text-[10px] shrink-0 font-semibold"
+                                        title="在 App Store 中打开"
+                                      >
+                                        ↗
+                                      </a>
+                                    )}
+                                  </div>
+                                  <span className="text-[9px] text-rose-400 font-bold bg-rose-500/10 px-1 py-0.2 rounded shrink-0">潜力指数: {opApp.oppScore}</span>
+                                </div>
+                                <p className="text-[9px] text-slate-500 flex justify-between pt-0.5">
+                                  <span>评分: {opApp.rating.toFixed(1)} ★ ({opApp.ratingCount} 个评分)</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* 痛点突破口 */}
+                            {opApp.coreComplaints && opApp.coreComplaints.length > 0 && (
+                              <div className="space-y-1 bg-rose-500/5 p-2 rounded border border-rose-500/10">
+                                <span className="text-[9px] font-black text-rose-300 block">💡 致命痛点切入点 (有极大重构升级空间)：</span>
+                                {opApp.coreComplaints.map((c: any, cIdx: number) => (
+                                  <div key={cIdx} className="text-[9.5px] leading-relaxed text-slate-400 pl-1 border-l border-rose-400/40 my-1">
+                                    <span className="font-bold text-rose-400">
+                                      “<TranslatedText 
+                                        text={c.title} 
+                                        enabled={enableTranslation} 
+                                        cache={translationCache} 
+                                        onTranslated={handleAddTranslation} 
+                                      />”
+                                    </span> -{' '}
+                                    <TranslatedText 
+                                      text={c.content.slice(0, 150) + (c.content.length > 150 ? '...' : '')} 
                                       enabled={enableTranslation} 
                                       cache={translationCache} 
                                       onTranslated={handleAddTranslation} 
-                                    />”
-                                  </span> -{' '}
-                                  <TranslatedText 
-                                    text={c.content.slice(0, 150) + (c.content.length > 150 ? '...' : '')} 
-                                    enabled={enableTranslation} 
-                                    cache={translationCache} 
-                                    onTranslated={handleAddTranslation} 
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* 2. SEO / ASO 搜索联想词树 */}
-                {analysisResults.hints.length > 0 && (
-                  <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-2.5 shrink-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-bold text-slate-200">🏷️ AppStore 搜索联想词 (ASO SEO)</h3>
-                      <span className="text-[9px] text-slate-500">反映真实用户输入词频</span>
+                  {/* 2. SEO / ASO 搜索联想词树 */}
+                  {analysisResults.hints.length > 0 && (
+                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-2.5 shrink-0">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold text-slate-200">🏷️ AppStore 搜索联想词 (ASO SEO)</h3>
+                        <span className="text-[9px] text-slate-500">反映真实用户输入词频</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                        {analysisResults.hints.map((term: string, idx: number) => (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              setAnalysisQuery(term);
+                            }}
+                            className="px-2.5 py-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-slate-300 hover:text-slate-100 rounded-lg text-[10px] transition-colors"
+                          >
+                            {term}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
-                      {analysisResults.hints.map((term: string, idx: number) => (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            setAnalysisQuery(term);
-                          }}
-                          className="px-2.5 py-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-slate-300 hover:text-slate-100 rounded-lg text-[10px] transition-colors"
-                        >
-                          {term}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  )}
 
-                {/* 3. 竞品 App格局深度解构 */}
-                <div className="space-y-3">
-                  <h3 className="text-xs font-bold text-slate-400">📱 竞品格局与商业模式解构</h3>
+                  {/* 3. 竞品 App格局深度解构 */}
                   <div className="space-y-3">
-                    {analysisResults.apps.map((app: any) => (
-                      <AppDetailCard 
-                        key={app.id} 
-                        app={app} 
-                        enableTranslation={enableTranslation}
-                        translationCache={translationCache}
-                        onTranslated={handleAddTranslation}
-                      />
-                    ))}
+                    <h3 className="text-xs font-bold text-slate-400">📱 竞品格局与商业模式解构</h3>
+                    <div className="space-y-3">
+                      {analysisResults.apps.map((app: any) => (
+                        <AppDetailCard 
+                          key={app.id} 
+                          app={app} 
+                          enableTranslation={enableTranslation}
+                          translationCache={translationCache}
+                          onTranslated={handleAddTranslation}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )
             ) : (
               !analysisLoading && (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-slate-900/20 rounded-2xl border border-slate-900/60">
                   <span className="text-4xl">📊</span>
                   <div className="space-y-1">
                     <p className="text-xs font-semibold text-slate-300">暂无分析数据</p>
-                    <p className="text-[10px] text-slate-500 max-w-[200px] leading-relaxed">请输入关键词或具体 App ID，系统将实时爬取 Apple AppStore 数据并计算付费意愿与痛点分布。</p>
+                    <p className="text-[10px] text-slate-500 max-w-[200px] leading-relaxed">
+                      {analysisMode === 'appstore' && '请输入关键词或具体 App ID，系统将实时爬取 Apple AppStore 数据并计算评估。'}
+                      {analysisMode === 'openvsx' && '请输入 Open VSX 插件 ID (如 meta.pyrefly) 并提供核心监测关键词，将为您评估搜索排名和优化方向。'}
+                      {analysisMode === 'chrome' && '请输入 Chrome 插件 ID 并提供核心监测关键词，将为您计算 ASO 能见度及市场竞争力。'}
+                    </p>
                   </div>
                 </div>
               )
