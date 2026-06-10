@@ -34,6 +34,70 @@ export default function Sidebar() {
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
+  // SEO 词频与 N-Gram 提取算法
+  const extractSEOKeywordsFromTexts = (texts: string[], isChinese: boolean) => {
+    const phraseCounts: Record<string, number> = {};
+    const enStopwords = [
+      'the', 'and', 'to', 'a', 'of', 'in', 'is', 'it', 'for', 'this', 'that', 'with', 
+      'but', 'i', 'you', 'app', 'my', 'on', 'have', 'are', 'was', 'so', 'just', 'be', 
+      'or', 'not', 'at', 'an', 'as', 'if', 'me', 'my', 'can', 'with', 'about', 'would',
+      'there', 'their', 'they', 'we', 'our', 'will', 'this', 'get', 'like', 'good', 
+      'great', 'love', 'use', 'really', 'very', 'more', 'when', 'some', 'out', 'all',
+      'one', 'only', 'than', 'into', 'even', 'make', 'also', 'after', 'been', 'which',
+      'extension', 'chrome', 'plugin', 'software', 'tool', 'helper', 'vscode', 'editor'
+    ];
+    
+    const zhStopwords = [
+      '的', '了', '是', '在', '我', '你', '他', '她', '它', '这', '那', '和', '有', '无', 
+      '也', '就', '都', '而', '及', '与', '被', '让', '使', '等', '及', '关于', '对于', 
+      '一个', '这个', '那个', '软件', '应用', '使用', '感觉', '觉得', '希望', '如果',
+      '不能', '无法', '支持', '更新', '下载', '打开', '闪退', '因为', '所以', '但是',
+      '插件', '扩展', '助手', '工具', '编辑器'
+    ];
+
+    texts.forEach(text => {
+      if (!text) return;
+      if (isChinese) {
+        const cleanText = text.replace(/[^一-龥]/g, ' ');
+        const segments = cleanText.split(/\s+/).filter(s => s.length >= 2);
+        segments.forEach(seg => {
+          for (let len of [2, 3, 4]) {
+            for (let i = 0; i <= seg.length - len; i++) {
+              const phrase = seg.slice(i, i + len);
+              if (!zhStopwords.some(sw => phrase.includes(sw) && phrase.length <= sw.length + 1)) {
+                phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1;
+              }
+            }
+          }
+        });
+      } else {
+        const cleanText = text.replace(/[^a-zA-Z\s]/g, '').toLowerCase();
+        const words = cleanText.split(/\s+/).filter(w => w.length > 2);
+        
+        // 1-gram
+        words.forEach(w => {
+          if (!enStopwords.includes(w)) {
+            phraseCounts[w] = (phraseCounts[w] || 0) + 1.2;
+          }
+        });
+        // 2-gram
+        for (let i = 0; i < words.length - 1; i++) {
+          const w1 = words[i];
+          const w2 = words[i+1];
+          if (!enStopwords.includes(w1) && !enStopwords.includes(w2)) {
+            const phrase = `${w1} ${w2}`;
+            phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1.0;
+          }
+        }
+      }
+    });
+
+    return Object.entries(phraseCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(e => ({ word: e[0], count: Math.round(e[1]) }));
+  };
+
   // 运行 Open VSX 插件市场分析与 ASO 排名评估
   const handleOpenVSXAnalysis = async () => {
     const query = analysisQuery.trim();
@@ -110,14 +174,40 @@ export default function Sidebar() {
             icon: comp.files?.icon || ''
           }));
 
+          // 口碑标杆评选 (借鉴目标)：排除自己，按 口碑分(平均评分 * (评价数 + 0.1)) 排序
+          const ownId = `${namespace}.${name}`.toLowerCase();
+          const listForBenchmark = list.filter((comp: any) => `${comp.namespace}.${comp.name}`.toLowerCase() !== ownId);
+          const benchmarkApps = listForBenchmark
+            .map((comp: any) => ({
+              name: comp.displayName || comp.name,
+              id: `${comp.namespace}.${comp.name}`,
+              downloads: comp.downloadCount || 0,
+              rating: comp.averageRating || 0,
+              reviewCount: comp.reviewCount || 0,
+              kpiScore: (comp.averageRating || 0) * ((comp.reviewCount || 0) + 0.1)
+            }))
+            .sort((a, b) => b.kpiScore - a.kpiScore)
+            .slice(0, 3);
+
+          // 关键词共性 ASO 挖掘：提取前 10 个排名最前插件的文案
+          const top10Texts: string[] = [];
+          list.slice(0, 10).forEach((comp: any) => {
+            if (comp.displayName) top10Texts.push(comp.displayName);
+            if (comp.description) top10Texts.push(comp.description);
+          });
+          const isChinese = ['cn', 'tw', 'hk'].includes(analysisCountry) || /[\u4e00-\u9fff]/.test(kw);
+          const seoKeywords = extractSEOKeywordsFromTexts(top10Texts, isChinese);
+
           kwResults.push({
             keyword: kw,
             rank: rank,
-            top3: top3Competitors
+            top3: top3Competitors,
+            benchmarks: benchmarkApps,
+            seoKeywords: seoKeywords
           });
         } catch (err) {
           console.error(`Error querying keyword ${kw}:`, err);
-          kwResults.push({ keyword: kw, rank: -1, top3: [] });
+          kwResults.push({ keyword: kw, rank: -1, top3: [], benchmarks: [], seoKeywords: [] });
         } finally {
           setAnalysisProgress(prev => prev + 1);
         }
@@ -211,7 +301,7 @@ export default function Sidebar() {
         optimizationActions.push({
           type: 'warning',
           title: '临界流量突破建议',
-          content: `关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 当前排名在 11-30 名之间。建议在插件 tags 列表和 description 正文开头增加这些词的出现频次，并在下个版本更新日志中描述该功能，以使其冲入前 10。`
+          content: `关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 当前排名在 11-30 名之间。建议在插件 tags 列表 and description 正文开头增加这些词的出现频次，并在下个版本更新日志中描述该功能，以使其冲入前 10。`
         });
       }
 
@@ -360,10 +450,11 @@ export default function Sidebar() {
           const slugMap: Record<string, string> = {}; 
           
           let match;
-          const regexForLoop = /\/detail\/([^"/]+)\/([a-z]{32})/gi;
-          while ((match = regexForLoop.exec(kwHtml)) !== null) {
-            const competitorSlug = match[1];
-            const competitorId = match[2].toLowerCase();
+          // 精确正则限制：使用带有 data-item-id 的卡片匹配，防止匹配到无关广告与侧边栏静态推荐
+          const itemRegex = /data-item-id="([a-z]{32})"[\s\S]*?href="\.\/detail\/([^/]+)\/\1"/gi;
+          while ((match = itemRegex.exec(kwHtml)) !== null) {
+            const competitorId = match[1].toLowerCase();
+            const competitorSlug = match[2];
             if (!foundIds.includes(competitorId)) {
               foundIds.push(competitorId);
               slugMap[competitorId] = competitorSlug;
@@ -376,26 +467,89 @@ export default function Sidebar() {
             rank = userIdx + 1;
           }
 
-          const top3Competitors = foundIds.slice(0, 3).map((compId) => {
-            const rawSlug = slugMap[compId] || '';
-            const cleanName = rawSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            return {
-              name: cleanName || compId,
+          // 并发 fetch 抓取前 3 名流量主详情，填充真实下载和评分数据
+          const top3Competitors = [];
+          const top3Texts: string[] = [];
+          for (let i = 0; i < Math.min(3, foundIds.length); i++) {
+            const compId = foundIds[i];
+            const compSlug = slugMap[compId] || '';
+            let compName = compSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            let compDl = 0;
+            let compRt = 0;
+            let compRev = 0;
+            let compDesc = '';
+            
+            try {
+              const compRes = await fetch(`https://chromewebstore.google.com/detail/placeholder/${compId}`, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+              });
+              if (compRes.ok) {
+                const compHtml = await compRes.text();
+                const tMatch = compHtml.match(/<title>([^<]+)<\/title>/i);
+                if (tMatch) {
+                  compName = tMatch[1].replace(/\s*-\s*Chrome\s*(Web\s*Store|应用商店)/i, '').trim();
+                }
+                const uMatch = compHtml.match(/([\d,\.\s]+)\+?\s*users/i) || compHtml.match(/([\d,\.\s]+)\+?\s*位用户/i);
+                if (uMatch) {
+                  compDl = parseInt(uMatch[1].replace(/[,.\s]/g, ''), 10) || 0;
+                }
+                const rMatch = compHtml.match(/Average rating\s+([\d\.]+)\s+out of/i) || compHtml.match(/aria-label="Average rating\s+([\d\.]+)/i);
+                if (rMatch) {
+                  compRt = parseFloat(rMatch[1]) || 0;
+                }
+                const revMatch = compHtml.match(/([\d,]+)\s+ratings/i) || compHtml.match(/([\d,]+)\s+个评分/i);
+                if (revMatch) {
+                  compRev = parseInt(revMatch[1].replace(/,/g, ''), 10) || 0;
+                }
+                const dMatch = compHtml.match(/<meta[^>]+name="description"[^>]+content="([^\"]+)"/i) || compHtml.match(/<meta[^>]+property="og:description"[^>]+content="([^\"]+)"/i);
+                if (dMatch) {
+                  compDesc = dMatch[1];
+                }
+              }
+            } catch (err) {
+              console.error('Fetch competitor details failed', err);
+            }
+            
+            top3Competitors.push({
+              name: compName || compId,
               id: compId,
-              downloads: 0,
-              rating: 0,
-              icon: ''
-            };
-          });
+              downloads: compDl,
+              rating: compRt,
+              reviewCount: compRev
+            });
+            top3Texts.push(compName);
+            if (compDesc) top3Texts.push(compDesc);
+          }
+
+          // 口碑标杆借鉴：在 Top 3 竞品中排除自己，按口碑值排序
+          const benchmarkApps = top3Competitors
+            .filter(comp => comp.id.toLowerCase() !== id.toLowerCase())
+            .map(comp => ({
+              name: comp.name,
+              id: comp.id,
+              downloads: comp.downloads,
+              rating: comp.rating,
+              reviewCount: comp.reviewCount,
+              kpiScore: comp.rating * (comp.reviewCount + 0.1)
+            }))
+            .sort((a, b) => b.kpiScore - a.kpiScore);
+
+          // 关键词共性 ASO 挖掘
+          const isChinese = ['cn', 'tw', 'hk'].includes(analysisCountry) || /[\u4e00-\u9fff]/.test(kw);
+          const seoKeywords = extractSEOKeywordsFromTexts(top3Texts, isChinese);
 
           kwResults.push({
             keyword: kw,
             rank: rank,
-            top3: top3Competitors
+            top3: top3Competitors,
+            benchmarks: benchmarkApps,
+            seoKeywords: seoKeywords
           });
         } catch (err) {
           console.error(`CWS keyword ${kw} query failed:`, err);
-          kwResults.push({ keyword: kw, rank: -1, top3: [] });
+          kwResults.push({ keyword: kw, rank: -1, top3: [], benchmarks: [], seoKeywords: [] });
         } finally {
           setAnalysisProgress(prev => prev + 1);
         }
@@ -495,7 +649,6 @@ export default function Sidebar() {
       setAnalysisLoading(false);
     }
   };
-
   const handleAnalysisSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (analysisMode === 'appstore') {
@@ -3000,12 +3153,44 @@ export default function Sidebar() {
                                   {kwRes.top3.map((comp: any, cidx: number) => (
                                     <div key={cidx} className="bg-slate-900/80 p-1.5 rounded border border-slate-850 flex flex-col justify-between text-[9px] min-w-0">
                                       <span className="text-slate-300 font-bold truncate" title={comp.name}>{comp.name}</span>
-                                      {comp.downloads > 0 && (
-                                        <span className="text-slate-500 truncate">{comp.downloads.toLocaleString()} dl</span>
-                                      )}
-                                      {comp.downloads === 0 && (
+                                      {comp.downloads > 0 ? (
+                                        <span className="text-slate-400 font-semibold truncate">
+                                          {comp.downloads >= 1000 ? `${(comp.downloads / 1000).toFixed(0)}k` : comp.downloads} {analysisResults.mode === 'chrome' ? 'users' : 'dl'}
+                                        </span>
+                                      ) : (
                                         <span className="text-slate-500 font-mono">No. {cidx+1}</span>
                                       )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Mined SEO/ASO Keywords */}
+                            {kwRes.seoKeywords && kwRes.seoKeywords.length > 0 && (
+                              <div className="space-y-1 pt-1.5 border-t border-slate-900/50">
+                                <span className="text-[9px] font-semibold text-slate-500 block">💡 逆向 ASO 词频挖掘 (高能见度热词):</span>
+                                <div className="flex flex-wrap gap-1">
+                                  {kwRes.seoKeywords.map((item: any, sidx: number) => (
+                                    <span key={sidx} className="px-1.5 py-0.2 bg-slate-900 border border-slate-850 text-slate-400 rounded text-[9px]">
+                                      {item.word} ({item.count})
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Recommended Benchmark/Inspiration Apps */}
+                            {kwRes.benchmarks && kwRes.benchmarks.length > 0 && (
+                              <div className="space-y-1 pt-1.5 border-t border-slate-900/50">
+                                <span className="text-[9px] font-bold text-indigo-400 block">🎯 借鉴口碑标杆 (高频好评/SEO佳作):</span>
+                                <div className="space-y-1">
+                                  {kwRes.benchmarks.map((bench: any, bidx: number) => (
+                                    <div key={bidx} className="flex justify-between items-center text-[9px] text-slate-400">
+                                      <span className="font-bold text-slate-300 truncate max-w-[130px]">{bidx+1}. {bench.name}</span>
+                                      <span className="text-slate-500 shrink-0 font-mono">
+                                        ★{bench.rating.toFixed(1)} ({bench.reviewCount}评) | {bench.downloads >= 100000 ? `${(bench.downloads/100000).toFixed(0)}y` : (bench.downloads >= 1000 ? `${(bench.downloads/1000).toFixed(0)}k` : bench.downloads)} dl
+                                      </span>
                                     </div>
                                   ))}
                                 </div>
