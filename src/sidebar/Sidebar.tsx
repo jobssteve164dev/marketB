@@ -18,6 +18,18 @@ type PostActivity = {
 
 type PostActivityMap = Record<string, PostActivity>;
 
+const getMarketLink = (id: string, mode: 'openvsx' | 'chrome') => {
+  if (!id) return '';
+  if (mode === 'openvsx') {
+    const parts = id.split('.');
+    const ns = parts[0];
+    const name = parts.slice(1).join('.');
+    return `https://open-vsx.org/extension/${ns}/${name}`;
+  } else {
+    return `https://chromewebstore.google.com/detail/placeholder/${id}`;
+  }
+};
+
 export default function Sidebar() {
   // 视图 Tab 切换
   const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'settings' | 'analysis'>('search');
@@ -33,6 +45,10 @@ export default function Sidebar() {
   const [analysisTotal, setAnalysisTotal] = useState(0);
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  // 存储的自定义插件列表
+  const [savedOpenVSXPlugins, setSavedOpenVSXPlugins] = useState<{ id: string; name: string }[]>([]);
+  const [savedChromePlugins, setSavedChromePlugins] = useState<{ id: string; name: string }[]>([]);
 
   // SEO 词频与 N-Gram 提取算法
   const extractSEOKeywordsFromTexts = (texts: string[], isChinese: boolean) => {
@@ -1070,7 +1086,9 @@ export default function Sidebar() {
         'yinliApiUrl',
         'yinliToken',
         'yinliUser',
-        'yinliActiveProductId'
+        'yinliActiveProductId',
+        'savedOpenVSXPlugins',
+        'savedChromePlugins'
       ], (result) => {
         if (result.postActivity) {
           setPostActivity(result.postActivity as PostActivityMap);
@@ -1094,6 +1112,12 @@ export default function Sidebar() {
         }
         if (result.yinliActiveProductId !== undefined) {
           setYinliActiveProductId(result.yinliActiveProductId);
+        }
+        if (result.savedOpenVSXPlugins) {
+          setSavedOpenVSXPlugins(result.savedOpenVSXPlugins);
+        }
+        if (result.savedChromePlugins) {
+          setSavedChromePlugins(result.savedChromePlugins);
         }
 
         if (result.keywords) {
@@ -2871,6 +2895,134 @@ export default function Sidebar() {
               </div>
             </div>
             
+            {/* 常用插件 ID 管理 */}
+            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+              <h3 className="text-xs font-semibold text-slate-300">常用插件 ID 管理</h3>
+              
+              {/* OpenVSX 插件保存 */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 block font-medium">OpenVSX 插件 ID (如 meta.pyrefly)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="newOpenVSXId"
+                    placeholder="ID: namespace.name"
+                    className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600"
+                  />
+                  <input
+                    type="text"
+                    id="newOpenVSXName"
+                    placeholder="备注"
+                    className="w-20 px-2 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idInput = document.getElementById('newOpenVSXId') as HTMLInputElement;
+                      const nameInput = document.getElementById('newOpenVSXName') as HTMLInputElement;
+                      const id = idInput?.value.trim();
+                      if (!id) return;
+                      const name = nameInput?.value.trim() || id;
+                      const updated = [...savedOpenVSXPlugins, { id, name }];
+                      setSavedOpenVSXPlugins(updated);
+                      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                        chrome.storage.local.set({ savedOpenVSXPlugins: updated });
+                      }
+                      if (idInput) idInput.value = '';
+                      if (nameInput) nameInput.value = '';
+                    }}
+                    className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold active:scale-95 transition-transform"
+                  >
+                    保存
+                  </button>
+                </div>
+                {/* 列表 */}
+                <div className="flex flex-wrap gap-1 mt-1 max-h-[80px] overflow-y-auto pr-1">
+                  {savedOpenVSXPlugins.map((plugin, index) => (
+                    <span key={index} className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-slate-950 border border-slate-850 rounded-md text-[10px] text-slate-300">
+                      <span className="truncate max-w-[80px]" title={plugin.id}>{plugin.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = savedOpenVSXPlugins.filter((_, i) => i !== index);
+                          setSavedOpenVSXPlugins(updated);
+                          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                            chrome.storage.local.set({ savedOpenVSXPlugins: updated });
+                          }
+                        }}
+                        className="text-slate-500 hover:text-rose-400 font-bold"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Chrome 插件保存 */}
+              <div className="space-y-1.5 pt-2.5 border-t border-slate-900/40">
+                <label className="text-[10px] text-slate-400 block font-medium">Chrome 插件 ID (32位小写字母)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="newChromeId"
+                    placeholder="32位 ID"
+                    className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600"
+                  />
+                  <input
+                    type="text"
+                    id="newChromeName"
+                    placeholder="备注"
+                    className="w-20 px-2 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idInput = document.getElementById('newChromeId') as HTMLInputElement;
+                      const nameInput = document.getElementById('newChromeName') as HTMLInputElement;
+                      const id = idInput?.value.trim().toLowerCase();
+                      if (!id || id.length !== 32) {
+                        showToast('请输入32位有效Chrome插件ID', 'error');
+                        return;
+                      }
+                      const name = nameInput?.value.trim() || id;
+                      const updated = [...savedChromePlugins, { id, name }];
+                      setSavedChromePlugins(updated);
+                      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                        chrome.storage.local.set({ savedChromePlugins: updated });
+                      }
+                      if (idInput) idInput.value = '';
+                      if (nameInput) nameInput.value = '';
+                    }}
+                    className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold active:scale-95 transition-transform"
+                  >
+                    保存
+                  </button>
+                </div>
+                {/* 列表 */}
+                <div className="flex flex-wrap gap-1 mt-1 max-h-[80px] overflow-y-auto pr-1">
+                  {savedChromePlugins.map((plugin, index) => (
+                    <span key={index} className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-slate-950 border border-slate-850 rounded-md text-[10px] text-slate-300">
+                      <span className="truncate max-w-[80px]" title={plugin.id}>{plugin.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = savedChromePlugins.filter((_, i) => i !== index);
+                          setSavedChromePlugins(updated);
+                          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                            chrome.storage.local.set({ savedChromePlugins: updated });
+                          }
+                        }}
+                        className="text-slate-500 hover:text-rose-400 font-bold"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
             {/* 快捷访问已适配平台 */}
             <div className="space-y-2 shrink-0">
               <h3 className="text-xs font-semibold text-slate-400">快捷访问已适配平台</h3>
@@ -3019,6 +3171,44 @@ export default function Sidebar() {
                   )}
                 </div>
 
+                {/* 快捷点击粘贴已存储的插件 */}
+                {analysisMode === 'openvsx' && savedOpenVSXPlugins.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 items-center bg-slate-950/40 p-2 rounded-lg border border-slate-850/50">
+                    <span className="text-[10px] text-slate-500 shrink-0">已存插件:</span>
+                    <div className="flex flex-wrap gap-1 max-h-[60px] overflow-y-auto">
+                      {savedOpenVSXPlugins.map((plugin, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setAnalysisQuery(plugin.id)}
+                          className="px-2 py-0.5 bg-slate-950 hover:bg-indigo-950 hover:text-indigo-300 border border-slate-850 hover:border-indigo-500/30 text-slate-300 rounded text-[9px] transition-colors truncate max-w-[120px]"
+                          title={plugin.id}
+                        >
+                          {plugin.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {analysisMode === 'chrome' && savedChromePlugins.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 items-center bg-slate-950/40 p-2 rounded-lg border border-slate-850/50">
+                    <span className="text-[10px] text-slate-500 shrink-0">已存插件:</span>
+                    <div className="flex flex-wrap gap-1 max-h-[60px] overflow-y-auto">
+                      {savedChromePlugins.map((plugin, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setAnalysisQuery(plugin.id)}
+                          className="px-2 py-0.5 bg-slate-950 hover:bg-indigo-950 hover:text-indigo-300 border border-slate-850 hover:border-indigo-500/30 text-slate-300 rounded text-[9px] transition-colors truncate max-w-[120px]"
+                          title={plugin.id}
+                        >
+                          {plugin.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {analysisMode !== 'appstore' && (
                   <input
                     type="text"
@@ -3072,7 +3262,18 @@ export default function Sidebar() {
                       </div>
                     )}
                     <div className="min-w-0 flex-1 space-y-1">
-                      <h3 className="text-xs font-bold text-slate-100 truncate">{analysisResults.displayName}</h3>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h3 className="text-xs font-bold text-slate-100 truncate">{analysisResults.displayName}</h3>
+                        <a
+                          href={getMarketLink(analysisResults.query, analysisResults.mode)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-400 hover:text-indigo-300 text-[10px] font-bold shrink-0 transition-colors"
+                          title="在市场中打开详情页"
+                        >
+                          ↗
+                        </a>
+                      </div>
                       <p className="text-[10px] text-slate-400 truncate font-mono">{analysisResults.query}</p>
                       <div className="flex flex-wrap gap-2 text-[9px] text-slate-500">
                         <span>下载/用户: <strong className="text-slate-300">{(analysisResults.downloads || 0).toLocaleString()}</strong></span>
@@ -3152,7 +3353,18 @@ export default function Sidebar() {
                                 <div className="grid grid-cols-3 gap-2">
                                   {kwRes.top3.map((comp: any, cidx: number) => (
                                     <div key={cidx} className="bg-slate-900/80 p-1.5 rounded border border-slate-850 flex flex-col justify-between text-[9px] min-w-0">
-                                      <span className="text-slate-300 font-bold truncate" title={comp.name}>{comp.name}</span>
+                                      <div className="flex items-center justify-between gap-1 min-w-0">
+                                        <span className="text-slate-300 font-bold truncate flex-1" title={comp.name}>{comp.name}</span>
+                                        <a
+                                          href={getMarketLink(comp.id, analysisResults.mode)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-indigo-400 hover:text-indigo-300 text-[10px] font-bold shrink-0 transition-colors"
+                                          title="在市场中打开"
+                                        >
+                                          ↗
+                                        </a>
+                                      </div>
                                       {comp.downloads > 0 ? (
                                         <span className="text-slate-400 font-semibold truncate">
                                           {comp.downloads >= 1000 ? `${(comp.downloads / 1000).toFixed(0)}k` : comp.downloads} {analysisResults.mode === 'chrome' ? 'users' : 'dl'}
@@ -3187,8 +3399,21 @@ export default function Sidebar() {
                                 <div className="space-y-1">
                                   {kwRes.benchmarks.map((bench: any, bidx: number) => (
                                     <div key={bidx} className="flex justify-between items-center text-[9px] text-slate-400">
-                                      <span className="font-bold text-slate-300 truncate max-w-[130px]">{bidx+1}. {bench.name}</span>
-                                      <span className="text-slate-500 shrink-0 font-mono">
+                                      <div className="flex items-center gap-1 min-w-0 flex-1">
+                                        <span className="font-bold text-slate-300 truncate max-w-[130px]" title={bench.name}>
+                                          {bidx+1}. {bench.name}
+                                        </span>
+                                        <a
+                                          href={getMarketLink(bench.id, analysisResults.mode)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-indigo-400 hover:text-indigo-300 text-[10px] font-bold shrink-0 transition-colors"
+                                          title="在市场中打开"
+                                        >
+                                          ↗
+                                        </a>
+                                      </div>
+                                      <span className="text-slate-500 shrink-0 font-mono pl-1">
                                         ★{bench.rating.toFixed(1)} ({bench.reviewCount}评) | {bench.downloads >= 100000 ? `${(bench.downloads/100000).toFixed(0)}y` : (bench.downloads >= 1000 ? `${(bench.downloads/1000).toFixed(0)}k` : bench.downloads)} dl
                                       </span>
                                     </div>
@@ -3217,8 +3442,21 @@ export default function Sidebar() {
                         <div className="space-y-1.5">
                           {analysisResults.categoryTop5.map((comp: any, cidx: number) => (
                             <div key={cidx} className="flex items-center justify-between text-[10px] text-slate-400 border-b border-slate-900/50 pb-1 last:border-b-0 last:pb-0">
-                              <span className="font-bold text-slate-300 truncate max-w-[140px]">{cidx+1}. {comp.name}</span>
-                              <span className="text-indigo-400 shrink-0">{comp.downloads.toLocaleString()} 下载</span>
+                              <div className="flex items-center gap-1 min-w-0 flex-1">
+                                <span className="font-bold text-slate-300 truncate max-w-[140px]" title={comp.name}>
+                                  {cidx+1}. {comp.name}
+                                </span>
+                                <a
+                                  href={getMarketLink(comp.id, 'openvsx')}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-400 hover:text-indigo-300 text-[10px] font-bold shrink-0 transition-colors"
+                                  title="在市场中打开"
+                                >
+                                  ↗
+                                </a>
+                              </div>
+                              <span className="text-indigo-400 shrink-0 pl-1">{comp.downloads.toLocaleString()} 下载</span>
                             </div>
                           ))}
                         </div>
