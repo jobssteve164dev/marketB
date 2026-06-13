@@ -1,5 +1,6 @@
 // 支持的平台
 export type Platform = "bilibili" | "youtube" | "twitter" | "facebook";
+export type PublishPlatform = Extract<Platform, "bilibili" | "youtube">;
 
 // 帖子/视频数据模型
 export interface Post {
@@ -50,12 +51,50 @@ export interface ReplyDraft {
   sentAt?: number;
 }
 
+export interface PublishContext {
+  platform: PublishPlatform;
+  pageUrl: string;
+  isUploadPage: boolean;
+  title: string;
+  description: string;
+  tags: string[];
+  coverSupported: boolean;
+  existingCoverUrl?: string | null;
+  warnings: string[];
+}
+
+export interface PublishAssetsInput {
+  title: string;
+  description: string;
+  tags: string[];
+  coverUrl?: string;
+}
+
+export interface PublishAssetsApplyResult {
+  success: boolean;
+  error?: string;
+  filledFields?: string[];
+  warnings?: string[];
+}
+
+export interface GeneratedPublishAssets {
+  titles: string[];
+  description: string;
+  tags: string[];
+  coverUrl?: string;
+  coverPrompt?: string;
+  checklist: string[];
+  warnings?: string[];
+}
+
 // 消息类型 (Background <-> Content Script <-> Sidebar)
 export type MessageType =
   | "SEARCH_POSTS"
   | "EXTRACT_AND_SCROLL"
   | "POSTS_PARSED"
   | "INJECT_COMMENT"
+  | "GET_PUBLISH_CONTEXT"
+  | "FILL_PUBLISH_ASSETS"
   | "RUN_COMMENT_TASKS"
   | "INJECT_COMMENT_RESULT"
   | "GET_KEYWORDS"

@@ -1,4 +1,10 @@
-import type { Post, Platform } from '../../shared/types.js';
+import type {
+  Post,
+  Platform,
+  PublishAssetsApplyResult,
+  PublishAssetsInput,
+  PublishContext
+} from '../../shared/types.js';
 
 export abstract class BaseAdapter {
   abstract platform: Platform;
@@ -8,6 +14,19 @@ export abstract class BaseAdapter {
   
   // 自动将评论填充到对应视频的评论输入框中，支持可选的自动发送提交
   abstract injectComment(postId: string, commentText: string, autoSubmit?: boolean): Promise<boolean>;
+
+  // 上传页上下文采集
+  async getPublishContext(): Promise<PublishContext | null> {
+    return null;
+  }
+
+  // 上传页资产回填
+  async fillPublishAssets(_assets: PublishAssetsInput): Promise<PublishAssetsApplyResult> {
+    return {
+      success: false,
+      error: '当前页面暂不支持资产回填'
+    };
+  }
   
   // 将文本（如 "1.2万", "4.5K", "100"）解析为数字
   protected parseNumber(str: string | null | undefined): number {

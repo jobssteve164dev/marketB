@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import type { Post, Keyword, Memo, Platform, YinliProduct, YinliSignal } from '../shared/types.js';
+import type {
+  GeneratedPublishAssets,
+  Keyword,
+  Memo,
+  Platform,
+  Post,
+  PublishContext,
+  YinliProduct,
+  YinliSignal
+} from '../shared/types.js';
 import { PLATFORM_CONFIG, DEFAULT_MEMO_TEMPLATES } from '../shared/constants.js';
 
 const DEFAULT_YINLI_URL = (import.meta as any).env?.VITE_YINLI_API_URL || 
   ((import.meta as any).env?.DEV ? 'http://localhost:3000' : 'https://seevoid.com');
+const DEFAULT_AIF_URL = (import.meta as any).env?.VITE_AIF_API_URL ||
+  ((import.meta as any).env?.DEV ? 'http://localhost:8787' : 'https://aif.seevoid.com');
 
 const getAuthHeaders = (token: string): Record<string, string> => {
   if (!token) return {};
@@ -17,6 +28,11 @@ type PostActivity = {
 };
 
 type PostActivityMap = Record<string, PostActivity>;
+
+type AifGenerationResponse = {
+  assets: GeneratedPublishAssets;
+  raw: any;
+};
 
 const getMarketLink = (id: string, mode: 'openvsx' | 'chrome') => {
   if (!id) return '';
@@ -32,13 +48,13 @@ const getMarketLink = (id: string, mode: 'openvsx' | 'chrome') => {
 
 export default function Sidebar() {
   // 视图 Tab 切换
-  const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'settings' | 'analysis'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'publish' | 'settings' | 'analysis'>('search');
   
   // AppStore / 插件分析 Tab 的专属状态
   const [analysisMode, setAnalysisMode] = useState<'appstore' | 'openvsx' | 'chrome'>('appstore');
   const [analysisQuery, setAnalysisQuery] = useState('');
   const [analysisKeywords, setAnalysisKeywords] = useState('');
-  const [analysisCategory, setAnalysisCategory] = useState('');
+  const [analysisCategory] = useState('');
   const [analysisCountry, setAnalysisCountry] = useState('us');
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
@@ -202,7 +218,7 @@ export default function Sidebar() {
               reviewCount: comp.reviewCount || 0,
               kpiScore: (comp.averageRating || 0) * ((comp.reviewCount || 0) + 0.1)
             }))
-            .sort((a, b) => b.kpiScore - a.kpiScore)
+            .sort((a: { kpiScore: number }, b: { kpiScore: number }) => b.kpiScore - a.kpiScore)
             .slice(0, 3);
 
           // 关键词共性 ASO 挖掘：提取前 10 个排名最前插件的文案
@@ -685,7 +701,7 @@ export default function Sidebar() {
   };
 
   // 记录上次检测到的标签页 URL，用于切换关键词或页面时清空抓取列表
-  const [lastUrl, setLastUrl] = useState('');
+  const [, setLastUrl] = useState('');
 
 
   // 运行苹果 AppStore 的商业可行性与 ASO 关键词分析（无付费 API 纯净本地版）
@@ -1060,6 +1076,21 @@ export default function Sidebar() {
   const [isInjecting, setIsInjecting] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(true); // 是否开启自动发布评论并自动关闭标签页
 
+  // AIF 资产发布工作台
+  const [aifApiUrl, setAifApiUrl] = useState(DEFAULT_AIF_URL);
+  const [aifApiKey, setAifApiKey] = useState('');
+  const [publishObjective, setPublishObjective] = useState('提高点击率与播放转化');
+  const [publishAudience, setPublishAudience] = useState('');
+  const [publishTone, setPublishTone] = useState('专业但有传播感');
+  const [publishCTA, setPublishCTA] = useState('');
+  const [publishExtraContext, setPublishExtraContext] = useState('');
+  const [publishContext, setPublishContext] = useState<PublishContext | null>(null);
+  const [publishAssets, setPublishAssets] = useState<GeneratedPublishAssets | null>(null);
+  const [selectedPublishTitle, setSelectedPublishTitle] = useState('');
+  const [isLoadingPublishContext, setIsLoadingPublishContext] = useState(false);
+  const [isGeneratingPublishAssets, setIsGeneratingPublishAssets] = useState(false);
+  const [isApplyingPublishAssets, setIsApplyingPublishAssets] = useState(false);
+
   
   // 当前浏览器活动 Tab 的环境状态
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
@@ -1071,6 +1102,161 @@ export default function Sidebar() {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  const persistAifConfig = (payload: Record<string, any>) => {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set(payload);
+    }
+  };
+
+  const normalizeGeneratedAssets = (payload: any): AifGenerationResponse => {
+    const root = payload?.assets || payload?.result?.assets || payload?.result || payload || {};
+    const titles = Array.isArray(root.titles)
+      ? root.titles
+      : Array.isArray(root.titleOptions)
+        ? root.titleOptions
+        : Array.isArray(root.title_candidates)
+          ? root.title_candidates
+          : [root.title].filter(Boolean);
+
+    const tags = Array.isArray(root.tags)
+      ? root.tags
+      : typeof root.tags === 'string'
+        ? root.tags.split(/[,，]/).map((tag: string) => tag.trim()).filter(Boolean)
+        : [];
+
+    const checklist = Array.isArray(root.checklist)
+      ? root.checklist
+      : Array.isArray(root.publishChecklist)
+        ? root.publishChecklist
+        : [];
+
+    return {
+      assets: {
+        titles,
+        description: root.description || root.desc || '',
+        tags,
+        coverUrl: root.coverUrl || root.thumbnailUrl || root.cover?.url || root.cover_image_url,
+        coverPrompt: root.coverPrompt || root.cover?.prompt || '',
+        checklist,
+        warnings: Array.isArray(root.warnings) ? root.warnings : []
+      },
+      raw: payload
+    };
+  };
+
+  const fetchPublishContext = () => {
+    if (!currentTabId || (currentPlatform !== 'bilibili' && currentPlatform !== 'youtube')) {
+      setPublishContext(null);
+      return;
+    }
+
+    setIsLoadingPublishContext(true);
+    chrome.tabs.sendMessage(currentTabId, { type: 'GET_PUBLISH_CONTEXT' }, (response) => {
+      setIsLoadingPublishContext(false);
+
+      if (chrome.runtime.lastError) {
+        console.error(chrome.runtime.lastError);
+        setPublishContext(null);
+        showToast('无法读取上传页上下文，请刷新上传页后重试', 'error');
+        return;
+      }
+
+      if (response?.success && response.context) {
+        setPublishContext(response.context as PublishContext);
+      } else {
+        setPublishContext(null);
+      }
+    });
+  };
+
+  const handleGeneratePublishAssets = async () => {
+    if (!publishContext?.isUploadPage) {
+      showToast('请先打开 Bilibili 或 YouTube 的上传页', 'error');
+      return;
+    }
+
+    setIsGeneratingPublishAssets(true);
+    setPublishAssets(null);
+    setSelectedPublishTitle('');
+
+    try {
+      const res = await fetch(`${aifApiUrl.replace(/\/$/, '')}/api/marketing/publish-assets/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          ...(aifApiKey.trim() ? { 'X-API-Key': aifApiKey.trim() } : {})
+        },
+        body: JSON.stringify({
+          platform: publishContext.platform,
+          objective: publishObjective,
+          audience: publishAudience,
+          tone: publishTone,
+          cta: publishCTA,
+          extraContext: publishExtraContext,
+          pageContext: publishContext
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'AIF 生成资产失败');
+      }
+
+      const normalized = normalizeGeneratedAssets(data);
+      setPublishAssets(normalized.assets);
+      setSelectedPublishTitle(normalized.assets.titles[0] || '');
+      showToast('AIF 资产包已生成，可直接回填到上传页', 'success');
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || '生成资产失败', 'error');
+    } finally {
+      setIsGeneratingPublishAssets(false);
+    }
+  };
+
+  const handleApplyPublishAssets = () => {
+    if (!currentTabId || !publishAssets) {
+      showToast('暂无可回填的资产包', 'error');
+      return;
+    }
+
+    const finalTitle = selectedPublishTitle.trim() || publishAssets.titles[0] || '';
+    if (!finalTitle) {
+      showToast('请先选择或生成至少一个标题', 'error');
+      return;
+    }
+
+    setIsApplyingPublishAssets(true);
+    chrome.tabs.sendMessage(currentTabId, {
+      type: 'FILL_PUBLISH_ASSETS',
+      assets: {
+        title: finalTitle,
+        description: publishAssets.description,
+        tags: publishAssets.tags,
+        coverUrl: publishAssets.coverUrl
+      }
+    }, (response) => {
+      setIsApplyingPublishAssets(false);
+
+      if (chrome.runtime.lastError) {
+        console.error(chrome.runtime.lastError);
+        showToast('回填失败，请刷新上传页后重试', 'error');
+        return;
+      }
+
+      if (response?.success) {
+        const warningText = Array.isArray(response.warnings) && response.warnings.length > 0
+          ? `，但有 ${response.warnings.length} 项需要手动确认`
+          : '';
+        showToast(`资产已回填${warningText}`, 'success');
+        fetchPublishContext();
+      } else {
+        showToast(response?.error || '资产回填失败', 'error');
+      }
+    });
   };
 
   // 1. 初始化时读取本地存储
@@ -1087,6 +1273,13 @@ export default function Sidebar() {
         'yinliToken',
         'yinliUser',
         'yinliActiveProductId',
+        'aifApiUrl',
+        'aifApiKey',
+        'publishObjective',
+        'publishAudience',
+        'publishTone',
+        'publishCTA',
+        'publishExtraContext',
         'savedOpenVSXPlugins',
         'savedChromePlugins'
       ], (result) => {
@@ -1112,6 +1305,27 @@ export default function Sidebar() {
         }
         if (result.yinliActiveProductId !== undefined) {
           setYinliActiveProductId(result.yinliActiveProductId);
+        }
+        if (result.aifApiUrl !== undefined) {
+          setAifApiUrl(result.aifApiUrl);
+        }
+        if (result.aifApiKey !== undefined) {
+          setAifApiKey(result.aifApiKey);
+        }
+        if (result.publishObjective !== undefined) {
+          setPublishObjective(result.publishObjective);
+        }
+        if (result.publishAudience !== undefined) {
+          setPublishAudience(result.publishAudience);
+        }
+        if (result.publishTone !== undefined) {
+          setPublishTone(result.publishTone);
+        }
+        if (result.publishCTA !== undefined) {
+          setPublishCTA(result.publishCTA);
+        }
+        if (result.publishExtraContext !== undefined) {
+          setPublishExtraContext(result.publishExtraContext);
         }
         if (result.savedOpenVSXPlugins) {
           setSavedOpenVSXPlugins(result.savedOpenVSXPlugins);
@@ -1221,6 +1435,9 @@ export default function Sidebar() {
             setPosts([]);
             setSelectedPostIds([]);
             setSelectedPost(null);
+            setPublishContext(null);
+            setPublishAssets(null);
+            setSelectedPublishTitle('');
           }
           return urlStr;
         });
@@ -1261,6 +1478,12 @@ export default function Sidebar() {
       };
     }
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'publish') {
+      fetchPublishContext();
+    }
+  }, [activeTab, currentTabId, currentPlatform]);
 
   // 3. 执行关键词搜索跳转
   const handleSearchKeyword = (keywordText: string) => {
@@ -2074,6 +2297,16 @@ export default function Sidebar() {
           📚 话术模板
         </button>
         <button
+          onClick={() => setActiveTab('publish')}
+          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
+            activeTab === 'publish'
+              ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          🚀 资产发布
+        </button>
+        <button
           onClick={() => setActiveTab('analysis')}
           className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'analysis' 
@@ -2854,7 +3087,230 @@ export default function Sidebar() {
           )
         )}
 
-        {/* VIEW 4: 设置中心 */}
+        {/* VIEW 4: 资产发布工作台 */}
+        {activeTab === 'publish' && (
+          <div className="flex flex-col h-full min-h-0 space-y-4 overflow-y-auto pr-1">
+            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-200">AIF 发布资产工作台</h3>
+                  <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                    在上传页直接生成标题、简介、标签和封面，然后一键回填到 Bilibili / YouTube。
+                  </p>
+                </div>
+                <button
+                  onClick={fetchPublishContext}
+                  disabled={isLoadingPublishContext}
+                  className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700/60 disabled:opacity-50"
+                >
+                  {isLoadingPublishContext ? '读取中...' : '刷新页面上下文'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div className="bg-slate-950/60 border border-slate-900 rounded-lg p-2">
+                  <span className="text-slate-500 block mb-1">当前平台</span>
+                  <span className="text-slate-200 font-semibold">
+                    {publishContext?.platform || currentPlatform || '未识别'}
+                  </span>
+                </div>
+                <div className="bg-slate-950/60 border border-slate-900 rounded-lg p-2">
+                  <span className="text-slate-500 block mb-1">上传页状态</span>
+                  <span className={`font-semibold ${publishContext?.isUploadPage ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {publishContext?.isUploadPage ? '已进入可回填页面' : '请打开 B站/YouTube 上传页'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="AIF API URL"
+                  value={aifApiUrl}
+                  onChange={(e) => {
+                    setAifApiUrl(e.target.value);
+                    persistAifConfig({ aifApiUrl: e.target.value });
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <input
+                  type="password"
+                  placeholder="AIF API Key（如需要）"
+                  value={aifApiKey}
+                  onChange={(e) => {
+                    setAifApiKey(e.target.value);
+                    persistAifConfig({ aifApiKey: e.target.value });
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-2 shrink-0">
+              <h3 className="text-xs font-semibold text-slate-300">生成约束</h3>
+              <input
+                type="text"
+                placeholder="目标受众，如：独立开发者 / AI 工具用户"
+                value={publishAudience}
+                onChange={(e) => {
+                  setPublishAudience(e.target.value);
+                  persistAifConfig({ publishAudience: e.target.value });
+                }}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <input
+                type="text"
+                placeholder="发布目标，如：提高点击率与播放转化"
+                value={publishObjective}
+                onChange={(e) => {
+                  setPublishObjective(e.target.value);
+                  persistAifConfig({ publishObjective: e.target.value });
+                }}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <input
+                type="text"
+                placeholder="语气，如：专业但有传播感"
+                value={publishTone}
+                onChange={(e) => {
+                  setPublishTone(e.target.value);
+                  persistAifConfig({ publishTone: e.target.value });
+                }}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <input
+                type="text"
+                placeholder="CTA，如：评论区领取模板"
+                value={publishCTA}
+                onChange={(e) => {
+                  setPublishCTA(e.target.value);
+                  persistAifConfig({ publishCTA: e.target.value });
+                }}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <textarea
+                placeholder="补充上下文：视频脚本摘要、想强调的卖点、不能碰的表述、封面偏好等"
+                value={publishExtraContext}
+                onChange={(e) => {
+                  setPublishExtraContext(e.target.value);
+                  persistAifConfig({ publishExtraContext: e.target.value });
+                }}
+                rows={4}
+                className="w-full p-3 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 resize-none"
+              />
+              <button
+                onClick={handleGeneratePublishAssets}
+                disabled={isGeneratingPublishAssets || !publishContext?.isUploadPage}
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 disabled:opacity-50 disabled:pointer-events-none text-xs"
+              >
+                {isGeneratingPublishAssets ? 'AIF 正在生成资产包...' : '生成发布资产包'}
+              </button>
+            </div>
+
+            <div className="bg-slate-900/40 border border-slate-800/70 rounded-xl p-3 space-y-3 min-h-0">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-semibold text-slate-300">当前页面上下文</h3>
+                {publishContext?.warnings && publishContext.warnings.length > 0 && (
+                  <span className="text-[10px] text-amber-400">{publishContext.warnings[0]}</span>
+                )}
+              </div>
+
+              {publishContext ? (
+                <div className="space-y-2 text-xs">
+                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                    <span className="text-slate-500 block mb-1 text-[10px]">页面标题</span>
+                    <p className="text-slate-200 leading-relaxed">{publishContext.title || '当前上传页标题为空'}</p>
+                  </div>
+                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                    <span className="text-slate-500 block mb-1 text-[10px]">页面简介</span>
+                    <p className="text-slate-300 leading-relaxed whitespace-pre-wrap">{publishContext.description || '当前上传页简介为空'}</p>
+                  </div>
+                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                    <span className="text-slate-500 block mb-1 text-[10px]">已有标签</span>
+                    <p className="text-slate-300">{publishContext.tags.length > 0 ? publishContext.tags.join(' / ') : '当前未读取到标签'}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl p-4 text-center">
+                  请切到 Bilibili 或 YouTube 上传页后，再打开这个 Tab。
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-900/40 border border-slate-800/70 rounded-xl p-3 space-y-3 min-h-0">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-semibold text-slate-300">生成结果</h3>
+                <button
+                  onClick={handleApplyPublishAssets}
+                  disabled={isApplyingPublishAssets || !publishAssets}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  {isApplyingPublishAssets ? '回填中...' : '一键回填到上传页'}
+                </button>
+              </div>
+
+              {!publishAssets ? (
+                <div className="text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl p-4 text-center">
+                  生成后会在这里展示标题候选、简介、标签和封面回填状态。
+                </div>
+              ) : (
+                <div className="space-y-3 text-xs">
+                  <div className="space-y-2">
+                    <span className="text-slate-400 font-semibold block">标题候选</span>
+                    {publishAssets.titles.map((title, index) => (
+                      <button
+                        key={`${title}-${index}`}
+                        onClick={() => setSelectedPublishTitle(title)}
+                        className={`w-full text-left p-2.5 rounded-lg border transition-colors ${
+                          selectedPublishTitle === title
+                            ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
+                            : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        {title}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                    <span className="text-slate-400 font-semibold block mb-1">简介</span>
+                    <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{publishAssets.description || '未返回简介'}</p>
+                  </div>
+
+                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                    <span className="text-slate-400 font-semibold block mb-1">标签</span>
+                    <p className="text-slate-300">{publishAssets.tags.length > 0 ? publishAssets.tags.join(' / ') : '未返回标签'}</p>
+                  </div>
+
+                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                    <span className="text-slate-400 font-semibold block mb-1">封面</span>
+                    {publishAssets.coverUrl ? (
+                      <div className="space-y-2">
+                        <img src={publishAssets.coverUrl} alt="" className="w-full rounded-lg border border-slate-800 object-cover max-h-40" />
+                        <p className="text-[10px] text-slate-500">回填时会自动尝试下载这张图并上传为封面。</p>
+                      </div>
+                    ) : (
+                      <p className="text-slate-500">{publishAssets.coverPrompt || '未返回封面图，可让 AIF 补封面 URL 或封面提示词。'}</p>
+                    )}
+                  </div>
+
+                  {publishAssets.checklist.length > 0 && (
+                    <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                      <span className="text-slate-400 font-semibold block mb-1">发布检查清单</span>
+                      <div className="space-y-1">
+                        {publishAssets.checklist.map((item, index) => (
+                          <p key={`${item}-${index}`} className="text-slate-300 leading-relaxed">• {item}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 5: 设置中心 */}
         {activeTab === 'settings' && (
           <div className="flex flex-col h-full space-y-4 min-h-0 overflow-y-auto">
             {/* 添加快捷词 */}
@@ -3891,5 +4347,3 @@ function TranslatedText({ text, enabled, cache, onTranslated }: TranslatedTextPr
 
   return <>{text}</>;
 }
-
-

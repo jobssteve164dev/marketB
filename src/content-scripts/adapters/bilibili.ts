@@ -1,5 +1,10 @@
 import { BaseAdapter } from './base.js';
-import type { Post } from '../../shared/types.js';
+import type {
+  Post,
+  PublishAssetsApplyResult,
+  PublishAssetsInput,
+  PublishContext
+} from '../../shared/types.js';
 
 export class BilibiliAdapter extends BaseAdapter {
   platform: 'bilibili' = 'bilibili';
@@ -394,5 +399,202 @@ export class BilibiliAdapter extends BaseAdapter {
     }
     
     return true;
+  }
+
+  async getPublishContext(): Promise<PublishContext | null> {
+    if (!this.isUploadPage()) return null;
+
+    const titleInput = this.findPublishTitleInput();
+    const descriptionInput = this.findPublishDescriptionInput();
+    const tagsInput = this.findPublishTagsInput();
+
+    return {
+      platform: 'bilibili',
+      pageUrl: window.location.href,
+      isUploadPage: true,
+      title: this.readPublishFieldValue(titleInput),
+      description: this.readPublishFieldValue(descriptionInput),
+      tags: this.readTagValues(tagsInput),
+      coverSupported: !!this.findPublishCoverInput(),
+      existingCoverUrl: this.findExistingPublishCoverUrl(),
+      warnings: tagsInput ? [] : ['当前 Bilibili 上传页未检测到标签输入框，可能需要先点开标签区域']
+    };
+  }
+
+  async fillPublishAssets(assets: PublishAssetsInput): Promise<PublishAssetsApplyResult> {
+    if (!this.isUploadPage()) {
+      return { success: false, error: '请先打开 Bilibili 投稿上传页' };
+    }
+
+    const warnings: string[] = [];
+    const filledFields: string[] = [];
+
+    const titleInput = this.findPublishTitleInput();
+    if (!titleInput) {
+      return { success: false, error: '未找到 Bilibili 标题输入框' };
+    }
+    this.writePublishFieldValue(titleInput, assets.title);
+    filledFields.push('title');
+
+    const descriptionInput = this.findPublishDescriptionInput();
+    if (descriptionInput && assets.description.trim()) {
+      this.writePublishFieldValue(descriptionInput, assets.description);
+      filledFields.push('description');
+    } else if (assets.description.trim()) {
+      warnings.push('未找到 Bilibili 简介输入区域');
+    }
+
+    if (assets.tags.length > 0) {
+      const tagsInput = this.findPublishTagsInput();
+      if (tagsInput) {
+        this.fillPublishTags(tagsInput, assets.tags);
+        filledFields.push('tags');
+      } else {
+        warnings.push('未找到 Bilibili 标签输入框');
+      }
+    }
+
+    if (assets.coverUrl) {
+      const coverInput = this.findPublishCoverInput();
+      if (coverInput) {
+        await this.uploadRemoteFileToInput(coverInput, assets.coverUrl, 'bilibili-cover');
+        filledFields.push('cover');
+      } else {
+        warnings.push('未找到 Bilibili 封面上传控件');
+      }
+    }
+
+    return {
+      success: true,
+      filledFields,
+      warnings
+    };
+  }
+
+  private isUploadPage() {
+    return window.location.hostname.includes('member.bilibili.com');
+  }
+
+  private findPublishTitleInput(): HTMLElement | null {
+    return this.queryAllDeep([
+      'input[placeholder*="标题"]',
+      'input[placeholder*="请输入稿件标题"]',
+      '.archive-title-box input',
+      '.video-title-input input'
+    ].join(', ')).find(element => this.isVisible(element)) || null;
+  }
+
+  private findPublishDescriptionInput(): HTMLElement | null {
+    return this.queryAllDeep([
+      'textarea[placeholder*="简介"]',
+      '.ql-editor',
+      '[contenteditable="true"][data-placeholder*="简介"]',
+      '[contenteditable="true"][placeholder*="简介"]'
+    ].join(', ')).find(element => this.isVisible(element)) || null;
+  }
+
+  private findPublishTagsInput(): HTMLElement | null {
+    return this.queryAllDeep([
+      'input[placeholder*="标签"]',
+      'input[placeholder*="按回车键Enter创建标签"]',
+      'input[placeholder*="按回车键"]',
+      '.tag-input input'
+    ].join(', ')).find(element => this.isVisible(element)) || null;
+  }
+
+  private findPublishCoverInput(): HTMLInputElement | null {
+    return this.queryAllDeep('input[type="file"][accept*="image"], input[type="file"]')
+      .find((element) => {
+        const input = element as HTMLInputElement;
+        return input.type === 'file' && /image|png|jpg|jpeg/i.test(input.accept || 'image');
+      }) as HTMLInputElement | null;
+  }
+
+  private findExistingPublishCoverUrl(): string | null {
+    const img = this.queryAllDeep('img')
+      .find((element) => /cover|封面|crop/i.test([
+        element.getAttribute('alt'),
+        element.getAttribute('class'),
+        element.getAttribute('src')
+      ].filter(Boolean).join(' ')));
+    return (img as HTMLImageElement | undefined)?.src || null;
+  }
+
+  private readPublishFieldValue(element: HTMLElement | null): string {
+    if (!element) return '';
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      return element.value.trim();
+    }
+    return (element.textContent || '').trim();
+  }
+
+  private readTagValues(input: HTMLElement | null): string[] {
+    const chips = this.queryAllDeep([
+      '.tag-pre-wrp .tag-item',
+      '.tag-list .tag-item',
+      '.topic-tag .item'
+    ].join(', '))
+      .map((item) => (item.textContent || '').trim())
+      .filter(Boolean);
+
+    if (chips.length > 0) return chips;
+    return input ? this.readPublishFieldValue(input).split(/[,，]/).map(tag => tag.trim()).filter(Boolean) : [];
+  }
+
+  private writePublishFieldValue(element: HTMLElement, value: string) {
+    element.focus();
+
+    if (element instanceof HTMLInputElement) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+
+    if (element instanceof HTMLTextAreaElement) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+
+    element.textContent = '';
+    document.execCommand('insertText', false, value);
+    if ((element.textContent || '').trim() !== value.trim()) {
+      element.textContent = value;
+    }
+    element.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      data: value,
+      inputType: 'insertText'
+    }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  private fillPublishTags(input: HTMLElement, tags: string[]) {
+    this.writePublishFieldValue(input, tags.join(', '));
+    input.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      bubbles: true
+    }));
+  }
+
+  private async uploadRemoteFileToInput(input: HTMLInputElement, fileUrl: string, filePrefix: string) {
+    const response = await fetch(fileUrl);
+    if (!response.ok) {
+      throw new Error(`封面下载失败: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const extension = blob.type.includes('png') ? 'png' : 'jpg';
+    const file = new File([blob], `${filePrefix}.${extension}`, { type: blob.type || 'image/png' });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   }
 }

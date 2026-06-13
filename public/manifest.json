@@ -47,6 +47,8 @@
     "*://*.x.com/*",
     "*://*.facebook.com/*",
     "*://localhost/*",
+    "http://*/*",
+    "https://*/*",
     "*://seevoid.com/*",
     "*://*.seevoid.com/*",
     "*://*.apple.com/*",

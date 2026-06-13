@@ -45,6 +45,26 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
         sendResponse({ success: false, error: err.message || 'Error occurred while injecting comment.' });
       });
     return true; // 返回 true 以支持异步 sendResponse
+  } else if (message.type === 'GET_PUBLISH_CONTEXT') {
+    adapter.getPublishContext()
+      .then((context) => {
+        if (!context) {
+          sendResponse({ success: false, error: '当前页面不是受支持的上传页' });
+          return;
+        }
+        sendResponse({ success: true, context });
+      })
+      .catch((err) => {
+        sendResponse({ success: false, error: err.message || '读取发布上下文失败' });
+      });
+    return true;
+  } else if (message.type === 'FILL_PUBLISH_ASSETS') {
+    adapter.fillPublishAssets(message.assets)
+      .then((result) => sendResponse(result))
+      .catch((err) => {
+        sendResponse({ success: false, error: err.message || '发布资产回填失败' });
+      });
+    return true;
   } else if (message.type === 'PING') {
     // 仅用于连通性探针
     sendResponse({ success: true, platform: adapter.platform });
