@@ -72,6 +72,82 @@ const Icon = ({ icon: IconComponent, className = 'w-3.5 h-3.5' }: { icon: Lucide
   <IconComponent className={className} aria-hidden="true" strokeWidth={2} />
 );
 
+const normalizeComparableUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/$/, '');
+  } catch {
+    return url.split('#')[0].split('?')[0].replace(/\/$/, '');
+  }
+};
+
+const isObjectRecord = (value: unknown): value is Record<string, any> => {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+};
+
+const hasAccountField = (value: Record<string, any>) => {
+  return [
+    'email',
+    'name',
+    'displayName',
+    'nickname',
+    'username',
+    'apiKey',
+    'userId',
+    'id',
+    'credits',
+    'remainingCredits',
+    'quota',
+    'plan',
+    'level'
+  ].some((key) => value[key] !== undefined && value[key] !== null && value[key] !== '');
+};
+
+const normalizeAifAccount = (payload: any) => {
+  const candidates = [
+    payload?.user,
+    payload?.account,
+    payload?.profile,
+    payload?.customer,
+    payload?.data?.user,
+    payload?.data?.account,
+    payload?.data?.profile,
+    payload?.data?.customer,
+    payload?.data,
+    payload?.result?.user,
+    payload?.result?.account,
+    payload?.result?.profile,
+    payload?.result
+  ];
+
+  const account = candidates.find((candidate) => isObjectRecord(candidate) && hasAccountField(candidate));
+  return account || (isObjectRecord(payload) && hasAccountField(payload) ? payload : null);
+};
+
+const getAifAccountLabel = (account: any) => {
+  if (!account) return '已连接账户';
+  const apiKey = typeof account.apiKey === 'string' ? account.apiKey : '';
+  if (account.email) return account.email;
+  if (account.name) return account.name;
+  if (account.displayName) return account.displayName;
+  if (account.nickname) return account.nickname;
+  if (account.username) return account.username;
+  if (account.userId) return `用户 ${account.userId}`;
+  if (account.id) return `用户 ${account.id}`;
+  if (apiKey) return `身份代码 ...${apiKey.slice(-6)}`;
+  return '已连接账户';
+};
+
+const getAifAccountBadge = (account: any) => {
+  if (!account) return '';
+  if (account.credits !== undefined) return `${account.credits} 积分`;
+  if (account.remainingCredits !== undefined) return `${account.remainingCredits} 积分`;
+  if (account.quota !== undefined) return `${account.quota} 额度`;
+  if (account.plan) return account.plan;
+  if (account.level) return account.level;
+  return '';
+};
+
 type PostActivity = {
   viewedAt?: number;
   openedAt?: number;
@@ -777,8 +853,9 @@ export default function Sidebar() {
     setTranslationCache(prev => ({ ...prev, [original]: translated }));
   };
 
-  // 记录上次检测到的标签页 URL，用于切换关键词或页面时清空抓取列表
-  const [, setLastUrl] = useState('');
+  // 记录活动页变化，但不让打开已抓取内容破坏当前候选列表。
+  const lastDetectedUrlRef = React.useRef('');
+  const postsRef = React.useRef<Post[]>([]);
 
 
   // 运行苹果 AppStore 的商业可行性与 ASO 关键词分析（无付费 API 纯净本地版）
@@ -1132,6 +1209,10 @@ export default function Sidebar() {
   const [filterHandledPosts, setFilterHandledPosts] = useState(true); // 跨话题过滤已回复视频
   const [isAutoScrolling, setIsAutoScrolling] = useState(false); // 是否处于自动滚屏抓取中
   const autoScrollIntervalRef = React.useRef<any>(null);
+
+  useEffect(() => {
+    postsRef.current = posts;
+  }, [posts]);
   
   // 隐力 YL 协同模式状态
   const [activeMode, setActiveMode] = useState<'local' | 'yinli'>('local');
@@ -1243,9 +1324,10 @@ export default function Sidebar() {
 
           if (res.ok) {
             const message = data?.message || data?.status || '博思万象连接验证通过，唯一身份代码可用';
+            const connectedAccount = normalizeAifAccount(data);
             setAifConnectionStatus({ type: 'success', message });
-            setAifConnectedUser(data?.user || null);
-            persistAifConfig({ aifConnectedUser: data?.user || null });
+            setAifConnectedUser(connectedAccount);
+            persistAifConfig({ aifConnectedUser: connectedAccount });
             showToast('博思万象连接验证通过', 'success');
             return;
           }
@@ -1614,19 +1696,24 @@ export default function Sidebar() {
         // 解析匹配的平台
         const urlStr = tab.url || '';
         
-        // 如果活动页的 URL 变化了，且是非空（例如新关键词搜索），清空旧抓取视频列表
-        setLastUrl((prevUrl) => {
-          if (urlStr && prevUrl && urlStr !== prevUrl) {
-            // URL 确实发生了改变，重置视频抓取列表
-            setPosts([]);
+        const prevUrl = lastDetectedUrlRef.current;
+        if (urlStr && prevUrl && urlStr !== prevUrl) {
+          const normalizedUrl = normalizeComparableUrl(urlStr);
+          const isOpeningCapturedPost = postsRef.current.some((post) => (
+            !!post.pageUrl && normalizeComparableUrl(post.pageUrl) === normalizedUrl
+          ));
+
+          if (!isOpeningCapturedPost && postsRef.current.length === 0) {
             setSelectedPostIds([]);
             setSelectedPost(null);
             setPublishContext(null);
             setPublishAssets(null);
             setSelectedPublishTitle('');
           }
-          return urlStr;
-        });
+        }
+        if (urlStr) {
+          lastDetectedUrlRef.current = urlStr;
+        }
 
         if (urlStr.includes('bilibili.com')) {
           setCurrentPlatform('bilibili');
@@ -3901,15 +3988,11 @@ export default function Sidebar() {
                   <div className="flex items-center justify-between gap-2 text-[10px] bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-2">
                     <span className="text-emerald-300 truncate inline-flex items-center gap-1.5">
                       <Icon icon={CircleCheck} className="w-3 h-3 shrink-0" />
-                      账号: {aifConnectedUser.email || aifConnectedUser.name || '已连接账户'}
+                      账号: {getAifAccountLabel(aifConnectedUser)}
                     </span>
-                    {aifConnectedUser.credits !== undefined ? (
+                    {getAifAccountBadge(aifConnectedUser) ? (
                       <span className="text-[9px] text-emerald-200 bg-emerald-500/10 rounded px-1.5 py-0.5 shrink-0">
-                        {aifConnectedUser.credits} 积分
-                      </span>
-                    ) : aifConnectedUser.level ? (
-                      <span className="text-[9px] text-emerald-200 bg-emerald-500/10 rounded px-1.5 py-0.5 shrink-0">
-                        {aifConnectedUser.level}
+                        {getAifAccountBadge(aifConnectedUser)}
                       </span>
                     ) : null}
                   </div>
