@@ -34,6 +34,63 @@ type AifGenerationResponse = {
   raw: any;
 };
 
+type MarketScrapeItem = {
+  id: string;
+  name: string;
+  description?: string;
+  downloads?: number;
+  rating?: number;
+  reviewCount?: number;
+  icon?: string;
+  url: string;
+};
+
+type MarketScrapeResult = {
+  url: string;
+  title: string;
+  text: string;
+  items: MarketScrapeItem[];
+  detail?: MarketScrapeItem & {
+    category?: string;
+    version?: string;
+  };
+};
+
+type MarketScrapeKind = 'openvsx-search' | 'openvsx-detail' | 'chrome-search' | 'chrome-detail';
+
+const scrapeMarketPage = (request: {
+  url: string;
+  kind: MarketScrapeKind;
+  targetId?: string;
+  keyword?: string;
+}): Promise<MarketScrapeResult> => {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+    return Promise.reject(new Error('当前环境无法打开真实市场页面，请在已安装的浏览器插件中运行分析。'));
+  }
+
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ type: 'SCRAPE_MARKET_PAGE', request }, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+      if (!response?.success) {
+        reject(new Error(response?.error || '市场页面抓取失败'));
+        return;
+      }
+      resolve(response.result);
+    });
+  });
+};
+
+const getOpenVSXSearchUrl = (keyword: string) => `https://open-vsx.org/?search=${encodeURIComponent(keyword)}`;
+const getOpenVSXDetailUrl = (id: string) => {
+  const [namespace, ...nameParts] = id.split('.');
+  return `https://open-vsx.org/extension/${encodeURIComponent(namespace)}/${encodeURIComponent(nameParts.join('.'))}`;
+};
+const getChromeSearchUrl = (keyword: string) => `https://chromewebstore.google.com/search/${encodeURIComponent(keyword)}`;
+
 const getMarketLink = (id: string, mode: 'openvsx' | 'chrome') => {
   if (!id) return '';
   if (mode === 'openvsx') {
@@ -145,32 +202,43 @@ export default function Sidebar() {
     setAnalysisTotal(1);
 
     try {
-      // 1. 解析 namespace 和 name
-      let namespace = '';
-      let name = '';
-      if (query.includes('.') || query.includes('/')) {
-        const parts = query.split(/[\.\/]/);
-        namespace = parts[0].trim();
-        name = parts[1].trim();
-      } else {
-        const searchUrl = `https://open-vsx.org/api/-/search?q=${encodeURIComponent(query)}&size=1`;
-        const res = await fetch(searchUrl);
-        const data = await res.json();
-        if (data.extensions && data.extensions.length > 0) {
-          namespace = data.extensions[0].namespace;
-          name = data.extensions[0].name;
-        } else {
-          throw new Error('未在 Open VSX 市场中找到匹配的插件，请提供精确的 namespace.name');
+      let targetId = query.replace('/', '.');
+      if (!targetId.includes('.')) {
+        const discovery = await scrapeMarketPage({
+          url: getOpenVSXSearchUrl(query),
+          kind: 'openvsx-search',
+          keyword: query
+        });
+        if (!discovery.items.length) {
+          throw new Error('未在 Open VSX 真实搜索页中找到匹配插件，请换一个插件名或输入 namespace.name');
         }
+        targetId = discovery.items[0].id;
       }
 
-      // 2. 获取插件详情
-      const detailUrl = `https://open-vsx.org/api/${namespace}/${name}`;
-      const detailRes = await fetch(detailUrl);
-      if (!detailRes.ok) {
-        throw new Error(`无法获取插件详情: ${namespace}.${name}`);
+      const [namespace, ...nameParts] = targetId.split('.');
+      const name = nameParts.join('.');
+      if (!namespace || !name) {
+        throw new Error('Open VSX 插件 ID 格式应为 namespace.name');
       }
-      const extDetail = await detailRes.json();
+
+      const detailPage = await scrapeMarketPage({
+        url: getOpenVSXDetailUrl(targetId),
+        kind: 'openvsx-detail',
+        targetId
+      });
+
+      let apiDetail: any = null;
+      try {
+        const detailRes = await fetch(`https://open-vsx.org/api/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+        if (detailRes.ok) apiDetail = await detailRes.json();
+      } catch (err) {
+        console.warn('Open VSX API detail enrichment failed:', err);
+      }
+
+      const detail: MarketScrapeResult['detail'] = detailPage.detail || detailPage.items.find(item => item.id.toLowerCase() === targetId.toLowerCase());
+      if (!detail && !apiDetail) {
+        throw new Error(`无法从 Open VSX 真实详情页读取插件详情: ${targetId}`);
+      }
       
       const kws = analysisKeywords
         .split(/[,，]/)
@@ -185,38 +253,42 @@ export default function Sidebar() {
       const kwResults = [];
       for (const kw of kws) {
         try {
-          const kwSearchUrl = `https://open-vsx.org/api/-/search?q=${encodeURIComponent(kw)}&size=100`;
-          const kwRes = await fetch(kwSearchUrl);
-          const kwData = await kwRes.json();
-          const list = kwData.extensions || [];
+          const searchPage = await scrapeMarketPage({
+            url: getOpenVSXSearchUrl(kw),
+            kind: 'openvsx-search',
+            targetId,
+            keyword: kw
+          });
+          const list = searchPage.items || [];
           
           let rank = -1;
           for (let i = 0; i < list.length; i++) {
-            if (list[i].namespace.toLowerCase() === namespace.toLowerCase() && list[i].name.toLowerCase() === name.toLowerCase()) {
+            if (list[i].id.toLowerCase() === targetId.toLowerCase()) {
               rank = i + 1;
               break;
             }
           }
 
           const top3Competitors = list.slice(0, 3).map((comp: any) => ({
-            name: comp.displayName || comp.name,
-            id: `${comp.namespace}.${comp.name}`,
-            downloads: comp.downloadCount || 0,
-            rating: comp.averageRating || 0,
-            icon: comp.files?.icon || ''
+            name: comp.name,
+            id: comp.id,
+            downloads: comp.downloads || 0,
+            rating: comp.rating || 0,
+            reviewCount: comp.reviewCount || 0,
+            icon: comp.icon || ''
           }));
 
           // 口碑标杆评选 (借鉴目标)：排除自己，按 口碑分(平均评分 * (评价数 + 0.1)) 排序
-          const ownId = `${namespace}.${name}`.toLowerCase();
-          const listForBenchmark = list.filter((comp: any) => `${comp.namespace}.${comp.name}`.toLowerCase() !== ownId);
+          const ownId = targetId.toLowerCase();
+          const listForBenchmark = list.filter((comp: any) => comp.id.toLowerCase() !== ownId);
           const benchmarkApps = listForBenchmark
             .map((comp: any) => ({
-              name: comp.displayName || comp.name,
-              id: `${comp.namespace}.${comp.name}`,
-              downloads: comp.downloadCount || 0,
-              rating: comp.averageRating || 0,
+              name: comp.name,
+              id: comp.id,
+              downloads: comp.downloads || 0,
+              rating: comp.rating || 0,
               reviewCount: comp.reviewCount || 0,
-              kpiScore: (comp.averageRating || 0) * ((comp.reviewCount || 0) + 0.1)
+              kpiScore: (comp.rating || 0) * ((comp.reviewCount || 0) + 0.1)
             }))
             .sort((a: { kpiScore: number }, b: { kpiScore: number }) => b.kpiScore - a.kpiScore)
             .slice(0, 3);
@@ -224,7 +296,7 @@ export default function Sidebar() {
           // 关键词共性 ASO 挖掘：提取前 10 个排名最前插件的文案
           const top10Texts: string[] = [];
           list.slice(0, 10).forEach((comp: any) => {
-            if (comp.displayName) top10Texts.push(comp.displayName);
+            if (comp.name) top10Texts.push(comp.name);
             if (comp.description) top10Texts.push(comp.description);
           });
           const isChinese = ['cn', 'tw', 'hk'].includes(analysisCountry) || /[\u4e00-\u9fff]/.test(kw);
@@ -249,9 +321,15 @@ export default function Sidebar() {
       let categoryRank = -1;
       let categoryTotal = 0;
       let categoryTop5: any[] = [];
-      const primaryCategory = (extDetail.categories && extDetail.categories.length > 0) 
-        ? extDetail.categories[0] 
-        : (analysisCategory.trim() || 'Other');
+      const primaryCategory = (apiDetail?.categories && apiDetail.categories.length > 0) 
+        ? apiDetail.categories[0] 
+        : (detail?.category || analysisCategory.trim() || 'Other');
+
+      if (apiDetail?.categories?.length) {
+        setAnalysisProgress(prev => prev + 1);
+      } else {
+        setAnalysisProgress(prev => prev + 1);
+      }
 
       try {
         const catUrl = `https://open-vsx.org/api/-/search?category=${encodeURIComponent(primaryCategory)}&sortBy=downloadCount&size=100`;
@@ -261,7 +339,7 @@ export default function Sidebar() {
         categoryTotal = catData.totalSize || catList.length;
 
         for (let i = 0; i < catList.length; i++) {
-          if (catList[i].namespace.toLowerCase() === namespace.toLowerCase() && catList[i].name.toLowerCase() === name.toLowerCase()) {
+          if (`${catList[i].namespace}.${catList[i].name}`.toLowerCase() === targetId.toLowerCase()) {
             categoryRank = i + 1;
             break;
           }
@@ -276,9 +354,12 @@ export default function Sidebar() {
         }));
       } catch (err) {
         console.error('Category analysis failed:', err);
-      } finally {
-        setAnalysisProgress(prev => prev + 1);
       }
+
+      const displayName = detail?.name || apiDetail?.displayName || name;
+      const targetDownloads = detail?.downloads || apiDetail?.downloadCount || 0;
+      const targetRating = detail?.rating || apiDetail?.averageRating || 0;
+      const targetReviewCount = detail?.reviewCount || apiDetail?.reviewCount || 0;
 
       // 5. 科学算法指标计算
       let sumVisibility = 0;
@@ -296,8 +377,7 @@ export default function Sidebar() {
       const aspi = kwResults.length > 0 ? Math.round(sumVisibility / kwResults.length) : 0;
 
       let downloadPercentile = 50;
-      const targetDownloads = extDetail.downloadCount || 0;
-      if (categoryRank > 0) {
+      if (categoryRank > 0 && categoryTotal > 0) {
         downloadPercentile = Math.round(((categoryTotal - categoryRank) / categoryTotal) * 100);
       } else {
         if (targetDownloads > 1000000) downloadPercentile = 98;
@@ -307,24 +387,24 @@ export default function Sidebar() {
         else downloadPercentile = 20;
       }
       
-      const ratingHealth = Math.round((extDetail.averageRating || 0) * 20);
+      const ratingHealth = Math.round(targetRating * 20);
       const mcoi = Math.round(0.4 * downloadPercentile + 0.4 * ratingHealth + 0.2 * aspi);
 
       const optimizationActions = [];
-      const titleLower = (extDetail.displayName || '').toLowerCase();
+      const titleLower = displayName.toLowerCase();
 
       const missingTitleKws = kws.filter(k => !titleLower.includes(k.toLowerCase()));
       if (missingTitleKws.length > 0) {
         optimizationActions.push({
           type: 'danger',
           title: 'ASO 标题权重缺失',
-          content: `核心检索词 [${missingTitleKws.join(', ')}] 未在您的插件显示名称 (displayName) 中出现。建议在不破坏品牌感的情况下，把主检索词融入 displayName 中（例如: ${extDetail.displayName} - ${missingTitleKws[0] || ''}）。`
+          content: `核心检索词 [${missingTitleKws.join(', ')}] 未在插件显示名称中出现。建议在不破坏品牌感的情况下，把主检索词融入显示名称中（例如: ${displayName} - ${missingTitleKws[0] || ''}）。`
         });
       } else if (kws.length > 0) {
         optimizationActions.push({
           type: 'success',
-          title: 'ASO 标题检索词覆盖完美',
-          content: `您的核心监测词已成功融入插件名称中，这提供了最高的搜索推荐基础权重。`
+          title: 'ASO 标题检索词覆盖良好',
+          content: '核心监测词已融入插件名称，搜索入口的相关性基础较好。'
         });
       }
 
@@ -333,21 +413,21 @@ export default function Sidebar() {
         optimizationActions.push({
           type: 'warning',
           title: '临界流量突破建议',
-          content: `关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 当前排名在 11-30 名之间。建议在插件 tags 列表 and description 正文开头增加这些词的出现频次，并在下个版本更新日志中描述该功能，以使其冲入前 10。`
+          content: `关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 当前排名在 11-30 名之间。建议在插件 tags 列表和 description 正文开头增加这些词的出现频次，并在下个版本更新日志中描述对应功能。`
         });
       }
 
-      if (extDetail.averageRating && extDetail.averageRating < 4.3) {
+      if (targetRating && targetRating < 4.3) {
         optimizationActions.push({
           type: 'danger',
           title: '评分健康度落后',
-          content: `当前平均评分 ${extDetail.averageRating.toFixed(1)} 低于同分类优质插件的水位 (>= 4.5)。请重点查看用户负面反馈，降低故障率，以避免搜索排名被算法降权。`
+          content: `当前平均评分 ${targetRating.toFixed(1)} 低于优质插件水位。请优先修复负面反馈中的高频问题，避免详情页转化和搜索排名继续受损。`
         });
-      } else if (targetDownloads > 100 && (extDetail.reviewCount || 0) === 0) {
+      } else if (targetDownloads > 100 && targetReviewCount === 0) {
         optimizationActions.push({
           type: 'warning',
           title: '引导好评机制缺失',
-          content: `您的下载量已达 ${targetDownloads}，但评价数为 0。建议引导活跃用户留下好评，能大幅拉升 ASO 综合权重。`
+          content: `插件已有 ${targetDownloads.toLocaleString()} 下载量，但评价数为 0。建议在用户完成关键成功动作后引导评价，拉升搜索可信度。`
         });
       }
 
@@ -356,20 +436,20 @@ export default function Sidebar() {
         optimizationActions.push({
           type: 'info',
           title: '分类领跑者追赶度量',
-          content: `当前分类 "${primaryCategory}" 的领跑者 "${categoryTop5[0].name}" 拥有 ${categoryTop5[0].downloads.toLocaleString()} 下载量。您与它相差 ${gap.toLocaleString()} 次下载。`
+          content: `当前分类 "${primaryCategory}" 的领跑者 "${categoryTop5[0].name}" 拥有 ${categoryTop5[0].downloads.toLocaleString()} 下载量。你与它相差 ${gap.toLocaleString()} 次下载。`
         });
       }
 
       setAnalysisResults({
         mode: 'openvsx',
-        query: `${namespace}.${name}`,
-        displayName: extDetail.displayName || name,
-        description: extDetail.description || '',
-        icon: extDetail.files?.icon || '',
+        query: targetId,
+        displayName,
+        description: detail?.description || apiDetail?.description || '',
+        icon: detail?.icon || apiDetail?.files?.icon || '',
         downloads: targetDownloads,
-        rating: extDetail.averageRating || 0,
-        reviewCount: extDetail.reviewCount || 0,
-        version: extDetail.version || '0.0.1',
+        rating: targetRating,
+        reviewCount: targetReviewCount,
+        version: detail?.version || apiDetail?.version || '0.0.1',
         category: primaryCategory,
         aspi,
         mcoi,
@@ -411,87 +491,37 @@ export default function Sidebar() {
     setAnalysisTotal(totalSteps);
 
     try {
-      // 1. 获取插件详情页并提取元数据
-      const detailUrl = `https://chromewebstore.google.com/detail/placeholder/${id}`;
-      const detailRes = await fetch(detailUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+      const detailPage = await scrapeMarketPage({
+        url: `https://chromewebstore.google.com/detail/placeholder/${id}`,
+        kind: 'chrome-detail',
+        targetId: id
       });
-      if (!detailRes.ok) {
-        throw new Error('未找到该 Chrome 插件，请确认插件 ID 是否已发布且公开。');
+      const detail: MarketScrapeResult['detail'] = detailPage.detail || detailPage.items.find(item => item.id.toLowerCase() === id.toLowerCase());
+      if (!detail) {
+        throw new Error('未从 Chrome Web Store 真实详情页读取到该插件，请确认插件 ID 是否已发布且公开。');
       }
-      const htmlText = await detailRes.text();
+
       setAnalysisProgress(1);
 
-      // 解析详情
-      let displayName = '';
-      const titleMatch = htmlText.match(/<title>([^<]+)<\/title>/i);
-      if (titleMatch) {
-        displayName = titleMatch[1].replace(/\s*-\s*Chrome\s*(Web\s*Store|应用商店)/i, '').trim();
-      } else {
-        displayName = '未命名插件';
-      }
-
-      let downloads = 0;
-      const usersMatch = htmlText.match(/([\d,\.\s]+)\+?\s*users/i) || htmlText.match(/([\d,\.\s]+)\+?\s*位用户/i);
-      if (usersMatch) {
-        downloads = parseInt(usersMatch[1].replace(/[,.\s]/g, ''), 10) || 0;
-      }
-
-      let rating = 0;
-      const ratingMatch = htmlText.match(/Average rating\s+([\d\.]+)\s+out of/i) || htmlText.match(/aria-label="Average rating\s+([\d\.]+)/i);
-      if (ratingMatch) {
-        rating = parseFloat(ratingMatch[1]) || 0;
-      }
-
-      let reviewCount = 0;
-      const ratingsMatch = htmlText.match(/([\d,]+)\s+ratings/i) || htmlText.match(/([\d,]+)\s+个评分/i);
-      if (ratingsMatch) {
-        reviewCount = parseInt(ratingsMatch[1].replace(/,/g, ''), 10) || 0;
-      }
-
-      let icon = '';
-      const ogImgMatch = htmlText.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i) || htmlText.match(/<meta\s+content="([^"]+)"\s+property="og:image"/i);
-      if (ogImgMatch) {
-        icon = ogImgMatch[1];
-      }
-
-      let primaryCategory = 'Other';
-      const cats = ['Productivity', 'Developer Tools', 'Workflow', 'Planning', 'Accessibility', 'Fun', 'Social', 'Shopping', 'Lifestyle', 'News', 'Education', 'Utilities', 'Communication', 'Photos'];
-      for (const cat of cats) {
-        if (htmlText.toLowerCase().includes(cat.toLowerCase())) {
-          primaryCategory = cat;
-          break;
-        }
-      }
+      const displayName = detail.name || '未命名插件';
+      const downloads = detail.downloads || 0;
+      const rating = detail.rating || 0;
+      const reviewCount = detail.reviewCount || 0;
+      const icon = detail.icon || '';
+      const primaryCategory = detail.category || 'Other';
 
       // 2. 关键词搜索排名抓取
       const kwResults = [];
       for (const kw of kws) {
         try {
-          const kwUrl = `https://chromewebstore.google.com/search/${encodeURIComponent(kw)}`;
-          const kwRes = await fetch(kwUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+          const searchPage = await scrapeMarketPage({
+            url: getChromeSearchUrl(kw),
+            kind: 'chrome-search',
+            targetId: id,
+            keyword: kw
           });
-          const kwHtml = await kwRes.text();
-          
-          const foundIds: string[] = [];
-          const slugMap: Record<string, string> = {}; 
-          
-          let match;
-          // 精确正则限制：使用带有 data-item-id 的卡片匹配，防止匹配到无关广告与侧边栏静态推荐
-          const itemRegex = /data-item-id="([a-z]{32})"[\s\S]*?href="\.\/detail\/([^/]+)\/\1"/gi;
-          while ((match = itemRegex.exec(kwHtml)) !== null) {
-            const competitorId = match[1].toLowerCase();
-            const competitorSlug = match[2];
-            if (!foundIds.includes(competitorId)) {
-              foundIds.push(competitorId);
-              slugMap[competitorId] = competitorSlug;
-            }
-          }
+          const searchItems = searchPage.items || [];
+          const foundIds = searchItems.map(item => item.id.toLowerCase());
 
           let rank = -1;
           const userIdx = foundIds.indexOf(id.toLowerCase());
@@ -499,60 +529,31 @@ export default function Sidebar() {
             rank = userIdx + 1;
           }
 
-          // 并发 fetch 抓取前 3 名流量主详情，填充真实下载和评分数据
           const top3Competitors = [];
           const top3Texts: string[] = [];
-          for (let i = 0; i < Math.min(3, foundIds.length); i++) {
-            const compId = foundIds[i];
-            const compSlug = slugMap[compId] || '';
-            let compName = compSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            let compDl = 0;
-            let compRt = 0;
-            let compRev = 0;
-            let compDesc = '';
-            
+          for (let i = 0; i < Math.min(3, searchItems.length); i++) {
+            const searchItem = searchItems[i];
+            let compDetail = searchItem;
             try {
-              const compRes = await fetch(`https://chromewebstore.google.com/detail/placeholder/${compId}`, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                }
+              const compPage = await scrapeMarketPage({
+                url: searchItem.url || `https://chromewebstore.google.com/detail/placeholder/${searchItem.id}`,
+                kind: 'chrome-detail',
+                targetId: searchItem.id
               });
-              if (compRes.ok) {
-                const compHtml = await compRes.text();
-                const tMatch = compHtml.match(/<title>([^<]+)<\/title>/i);
-                if (tMatch) {
-                  compName = tMatch[1].replace(/\s*-\s*Chrome\s*(Web\s*Store|应用商店)/i, '').trim();
-                }
-                const uMatch = compHtml.match(/([\d,\.\s]+)\+?\s*users/i) || compHtml.match(/([\d,\.\s]+)\+?\s*位用户/i);
-                if (uMatch) {
-                  compDl = parseInt(uMatch[1].replace(/[,.\s]/g, ''), 10) || 0;
-                }
-                const rMatch = compHtml.match(/Average rating\s+([\d\.]+)\s+out of/i) || compHtml.match(/aria-label="Average rating\s+([\d\.]+)/i);
-                if (rMatch) {
-                  compRt = parseFloat(rMatch[1]) || 0;
-                }
-                const revMatch = compHtml.match(/([\d,]+)\s+ratings/i) || compHtml.match(/([\d,]+)\s+个评分/i);
-                if (revMatch) {
-                  compRev = parseInt(revMatch[1].replace(/,/g, ''), 10) || 0;
-                }
-                const dMatch = compHtml.match(/<meta[^>]+name="description"[^>]+content="([^\"]+)"/i) || compHtml.match(/<meta[^>]+property="og:description"[^>]+content="([^\"]+)"/i);
-                if (dMatch) {
-                  compDesc = dMatch[1];
-                }
-              }
+              compDetail = compPage.detail || searchItem;
             } catch (err) {
               console.error('Fetch competitor details failed', err);
             }
-            
+
             top3Competitors.push({
-              name: compName || compId,
-              id: compId,
-              downloads: compDl,
-              rating: compRt,
-              reviewCount: compRev
+              name: compDetail.name || searchItem.name || searchItem.id,
+              id: searchItem.id,
+              downloads: compDetail.downloads || searchItem.downloads || 0,
+              rating: compDetail.rating || searchItem.rating || 0,
+              reviewCount: compDetail.reviewCount || searchItem.reviewCount || 0
             });
-            top3Texts.push(compName);
-            if (compDesc) top3Texts.push(compDesc);
+            top3Texts.push(compDetail.name || searchItem.name || '');
+            if (compDetail.description || searchItem.description) top3Texts.push(compDetail.description || searchItem.description || '');
           }
 
           // 口碑标杆借鉴：在 Top 3 竞品中排除自己，按口碑值排序
@@ -620,13 +621,13 @@ export default function Sidebar() {
         optimizationActions.push({
           type: 'danger',
           title: 'ASO 检索词覆盖警告',
-          content: `核心监测词 [${missingTitleKws.join(', ')}] 未在您的插件标题中包含。建议在不破坏品牌感的情况下，将核心检索词植入您的插件显示名称中。`
+          content: `核心监测词 [${missingTitleKws.join(', ')}] 未在插件标题中包含。建议在不破坏品牌感的情况下，将核心检索词植入插件显示名称中。`
         });
       } else if (kws.length > 0) {
         optimizationActions.push({
           type: 'success',
           title: 'ASO 标题检索词状态良好',
-          content: `您的核心监测词已很好地包含在插件显示名称中。`
+          content: '核心监测词已包含在插件显示名称中。'
         });
       }
 
@@ -635,21 +636,21 @@ export default function Sidebar() {
         optimizationActions.push({
           type: 'warning',
           title: '搜索临界区突破方案',
-          content: `您的插件在关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 的搜索结果中排在 11-30 名。建议在详细描述 (Store Listing Description) 的前几句合理增加这些词的出现频次，以便有效冲入搜索前 10。`
+          content: `插件在关键词 [${borderLineKws.map(i => i.keyword).join(', ')}] 的搜索结果中排在 11-30 名。建议在详情描述前几句自然增加这些词，并用截图/标题强化对应功能。`
         });
       }
 
       if (rating > 0 && rating < 4.2) {
         optimizationActions.push({
           type: 'danger',
-          title: '转化率流失警告 (评分偏低)',
-          content: `当前评分 ${rating.toFixed(1)} 偏低。这会影响详情页转化率和自然搜索排名，建议针对用户负面反馈打磨体验。`
+          title: '转化率流失警告',
+          content: `当前评分 ${rating.toFixed(1)} 偏低，会影响详情页转化率和自然搜索排名。建议优先处理用户负面反馈中的高频故障。`
         });
       } else if (downloads > 100 && reviewCount === 0) {
         optimizationActions.push({
           type: 'warning',
-          title: '缺少社交共鸣 (0 ratings)',
-          content: `用户已有 ${downloads} 人，但评分为 0。建议在插件内引导活跃用户留下评论以突破冷启动瓶颈。`
+          title: '缺少评价沉淀',
+          content: `插件已有 ${downloads.toLocaleString()} 用户，但评分为 0。建议在插件内关键成功动作完成后引导活跃用户评价。`
         });
       }
 
@@ -657,12 +658,12 @@ export default function Sidebar() {
         mode: 'chrome',
         query: id,
         displayName,
-        description: '',
-        icon: icon || '',
+        description: detail.description || '',
+        icon,
         downloads,
         rating,
         reviewCount,
-        version: '',
+        version: detail.version || '',
         category: primaryCategory,
         aspi,
         mcoi,
@@ -681,6 +682,7 @@ export default function Sidebar() {
       setAnalysisLoading(false);
     }
   };
+
   const handleAnalysisSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (analysisMode === 'appstore') {
