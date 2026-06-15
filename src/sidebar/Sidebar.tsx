@@ -1169,6 +1169,10 @@ export default function Sidebar() {
   const [isApplyingPublishAssets, setIsApplyingPublishAssets] = useState(false);
   const [isTestingAifConnection, setIsTestingAifConnection] = useState(false);
   const [aifConnectionStatus, setAifConnectionStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [aifConnectedUser, setAifConnectedUser] = useState<any>(null);
+  const [isLoadingYinliProducts, setIsLoadingYinliProducts] = useState(false);
+  const [yinliProductsError, setYinliProductsError] = useState<string | null>(null);
+  const [yinliSignalsError, setYinliSignalsError] = useState<string | null>(null);
 
   
   // 当前浏览器活动 Tab 的环境状态
@@ -1208,8 +1212,8 @@ export default function Sidebar() {
       'X-API-Key': identityCode
     };
     const endpoints = [
-      '/api/marketing/publish-assets/health',
       '/api/marketing/publish-assets/verify',
+      '/api/marketing/publish-assets/health',
       '/api/health',
       '/health'
     ];
@@ -1240,6 +1244,8 @@ export default function Sidebar() {
           if (res.ok) {
             const message = data?.message || data?.status || '博思万象连接验证通过，唯一身份代码可用';
             setAifConnectionStatus({ type: 'success', message });
+            setAifConnectedUser(data?.user || null);
+            persistAifConfig({ aifConnectedUser: data?.user || null });
             showToast('博思万象连接验证通过', 'success');
             return;
           }
@@ -1270,6 +1276,7 @@ export default function Sidebar() {
     } catch (err: any) {
       const message = err?.message || '博思万象连接验证失败';
       setAifConnectionStatus({ type: 'error', message });
+      setAifConnectedUser(null);
       showToast(message, 'error');
     } finally {
       setIsTestingAifConnection(false);
@@ -1441,6 +1448,7 @@ export default function Sidebar() {
         'yinliActiveProductId',
         'aifApiUrl',
         'aifApiKey',
+        'aifConnectedUser',
         'publishObjective',
         'publishAudience',
         'publishTone',
@@ -1483,6 +1491,12 @@ export default function Sidebar() {
         }
         if (result.aifApiKey !== undefined) {
           setAifApiKey(result.aifApiKey);
+        }
+        if (result.aifConnectedUser !== undefined) {
+          setAifConnectedUser(result.aifConnectedUser);
+          if (result.aifConnectedUser) {
+            setAifConnectionStatus({ type: 'success', message: '博思万象连接已保存' });
+          }
         }
         if (result.publishObjective !== undefined) {
           setPublishObjective(result.publishObjective);
@@ -1829,8 +1843,8 @@ export default function Sidebar() {
   // ==================== 隐力 YL 协同模块接口逻辑 ====================
 
   // 1. 隐力 API Key 绑定
-  const handleYinliLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleYinliLogin = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!yinliApiKey.trim()) {
       showToast('请输入隐力 API Key', 'error');
       return;
@@ -1856,20 +1870,25 @@ export default function Sidebar() {
       // 验证成功后，直接使用输入的 API Key 作为 token 保存
       setYinliToken(targetKey);
       setYinliUser(data.user);
+      setYinliProducts([]);
+      setYinliActiveProductId('');
+      setYinliSignals([]);
+      setSelectedYinliSignal(null);
       
       if (typeof chrome !== 'undefined' && chrome.storage?.local) {
         chrome.storage.local.set({
           yinliToken: targetKey,
           yinliUser: data.user,
           yinliApiUrl: yinliApiUrl, // 同时保存 API 服务端地址，以防重新启动后被重置为默认值导致验证失败
+          yinliActiveProductId: '',
         });
       }
 
-      showToast('隐力 API Key 绑定成功！', 'success');
+      showToast(yinliToken ? '隐力账户已更换并重新绑定' : '隐力 API Key 绑定成功！', 'success');
       setYinliApiKey('');
       
       // 绑定成功后拉取产品列表
-      fetchYinliProducts(targetKey);
+      await fetchYinliProducts(targetKey, '');
     } catch (err: any) {
       console.error(err);
       showToast(err.message || '连接异常，请确保 YL 协同服务运行中', 'error');
@@ -1898,35 +1917,51 @@ export default function Sidebar() {
   };
 
   // 3. 拉取产品列表
-  const fetchYinliProducts = async (tokenOverride?: string) => {
+  const fetchYinliProducts = async (tokenOverride?: string, preferredProductId?: string) => {
     const token = tokenOverride || yinliToken;
     if (!token) return;
 
+    setIsLoadingYinliProducts(true);
+    setYinliProductsError(null);
     try {
       const res = await fetch(`${yinliApiUrl}/api/product`, {
         headers: { 
+          'Accept': 'application/json',
           ...getAuthHeaders(token)
         },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '获取产品失败');
 
-      setYinliProducts(data.products || []);
+      const products = Array.isArray(data.products) ? data.products : [];
+      setYinliProducts(products);
       
-      if (data.products && data.products.length > 0) {
+      if (products.length > 0) {
         // 如果没有当前选中的产品，或者历史选中的产品已不在列表中，默认选中第一个
-        const exists = data.products.some((p: any) => p.id === yinliActiveProductId);
-        if (!yinliActiveProductId || !exists) {
-          const firstProductId = data.products[0].id;
-          setYinliActiveProductId(firstProductId);
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            chrome.storage.local.set({ yinliActiveProductId: firstProductId });
-          }
+        const candidateProductId = preferredProductId !== undefined ? preferredProductId : yinliActiveProductId;
+        const exists = candidateProductId && products.some((p: any) => p.id === candidateProductId);
+        const nextProductId = exists ? candidateProductId : products[0].id;
+        setYinliActiveProductId(nextProductId);
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.set({ yinliActiveProductId: nextProductId });
         }
+        return nextProductId;
       }
+      setYinliActiveProductId('');
+      setYinliSignals([]);
+      setSelectedYinliSignal(null);
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        chrome.storage.local.set({ yinliActiveProductId: '' });
+      }
+      return '';
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || '获取产品列表失败', 'error');
+      const message = err.message || '获取产品列表失败';
+      setYinliProductsError(message);
+      showToast(message, 'error');
+      return '';
+    } finally {
+      setIsLoadingYinliProducts(false);
     }
   };
 
@@ -1935,6 +1970,7 @@ export default function Sidebar() {
     if (!yinliToken || !productId) return;
 
     setIsLoadingSignals(true);
+    setYinliSignalsError(null);
     try {
       // 仅拉取 NEW、STRATEGIZED、APPROVED 状态的信号，排除已发布的信号
       const res = await fetch(`${yinliApiUrl}/api/product/${productId}/strategies?status=NEW,STRATEGIZED,APPROVED`, {
@@ -1945,14 +1981,17 @@ export default function Sidebar() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '获取信号失败');
 
-      setYinliSignals(data.signals || []);
+      const signals = Array.isArray(data.signals) ? data.signals : [];
+      setYinliSignals(signals);
       
-      if (!data.signals || data.signals.length === 0) {
+      if (signals.length === 0) {
         showToast('该产品下暂无待回复的隐力信号', 'info');
       }
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || '获取信号数据失败', 'error');
+      const message = err.message || '获取信号数据失败';
+      setYinliSignalsError(message);
+      showToast(message, 'error');
     } finally {
       setIsLoadingSignals(false);
     }
@@ -2012,11 +2051,13 @@ export default function Sidebar() {
   // 7. 定时/切换自动加载逻辑
   useEffect(() => {
     if (activeMode === 'yinli' && yinliToken) {
-      if (yinliActiveProductId) {
-        fetchYinliSignals(yinliActiveProductId);
-      } else {
-        fetchYinliProducts();
-      }
+      fetchYinliProducts();
+    }
+  }, [activeMode, yinliToken]);
+
+  useEffect(() => {
+    if (activeMode === 'yinli' && yinliToken && yinliActiveProductId) {
+      fetchYinliSignals(yinliActiveProductId);
     }
   }, [activeMode, yinliToken, yinliActiveProductId]);
 
@@ -2589,7 +2630,12 @@ export default function Sidebar() {
                 <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between gap-3 shrink-0 shadow-sm">
                   <div className="flex-1 min-w-0">
                     <label className="text-[9px] text-slate-500 block mb-0.5 uppercase tracking-wide">隐力监控产品</label>
-                    {yinliProducts.length > 0 ? (
+                    {isLoadingYinliProducts ? (
+                      <span className="text-xs text-slate-500 inline-flex items-center gap-1.5">
+                        <Icon icon={LoaderCircle} className="w-3 h-3 animate-spin" />
+                        正在读取监控产品...
+                      </span>
+                    ) : yinliProducts.length > 0 ? (
                       <select
                         value={yinliActiveProductId}
                         onChange={(e) => {
@@ -2607,9 +2653,19 @@ export default function Sidebar() {
                         ))}
                       </select>
                     ) : (
-                      <span className="text-xs text-slate-500 block">暂无产品，请前往网页端添加</span>
+                      <span className="text-xs text-slate-500 block">
+                        {yinliProductsError || '暂无产品，请前往网页端添加'}
+                      </span>
                     )}
                   </div>
+                  <button
+                    onClick={() => fetchYinliProducts()}
+                    disabled={isLoadingYinliProducts}
+                    className="p-2 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white transition-colors active:scale-95 border border-slate-700/50 shrink-0 disabled:opacity-50"
+                    title="刷新监控产品"
+                  >
+                    {isLoadingYinliProducts ? <Icon icon={LoaderCircle} className="w-4 h-4 animate-spin" /> : <Icon icon={Box} className="w-4 h-4" />}
+                  </button>
                   <button
                     onClick={() => yinliActiveProductId && fetchYinliSignals(yinliActiveProductId)}
                     disabled={isLoadingSignals || !yinliActiveProductId}
@@ -2630,6 +2686,11 @@ export default function Sidebar() {
                       </span>
                     )}
                   </h3>
+                  {yinliSignalsError && (
+                    <div className="text-[10px] text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2.5 py-2 leading-relaxed">
+                      {yinliSignalsError}
+                    </div>
+                  )}
                   
                   {isLoadingSignals ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs">
@@ -3738,7 +3799,8 @@ export default function Sidebar() {
                     onChange={(e) => {
                       setAifApiUrl(e.target.value);
                       setAifConnectionStatus(null);
-                      persistAifConfig({ aifApiUrl: e.target.value });
+                      setAifConnectedUser(null);
+                      persistAifConfig({ aifApiUrl: e.target.value, aifConnectedUser: null });
                     }}
                     className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
                   />
@@ -3752,7 +3814,8 @@ export default function Sidebar() {
                     onChange={(e) => {
                       setAifApiKey(e.target.value);
                       setAifConnectionStatus(null);
-                      persistAifConfig({ aifApiKey: e.target.value });
+                      setAifConnectedUser(null);
+                      persistAifConfig({ aifApiKey: e.target.value, aifConnectedUser: null });
                     }}
                     className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
                   />
@@ -3775,6 +3838,23 @@ export default function Sidebar() {
                         : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300'
                   }`}>
                     {aifConnectionStatus.message}
+                  </div>
+                )}
+                {aifConnectedUser && (
+                  <div className="flex items-center justify-between gap-2 text-[10px] bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-2.5 py-2">
+                    <span className="text-emerald-300 truncate inline-flex items-center gap-1.5">
+                      <Icon icon={CircleCheck} className="w-3 h-3 shrink-0" />
+                      账号: {aifConnectedUser.email || aifConnectedUser.name || '已连接账户'}
+                    </span>
+                    {aifConnectedUser.credits !== undefined ? (
+                      <span className="text-[9px] text-emerald-200 bg-emerald-500/10 rounded px-1.5 py-0.5 shrink-0">
+                        {aifConnectedUser.credits} 积分
+                      </span>
+                    ) : aifConnectedUser.level ? (
+                      <span className="text-[9px] text-emerald-200 bg-emerald-500/10 rounded px-1.5 py-0.5 shrink-0">
+                        {aifConnectedUser.level}
+                      </span>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -3811,6 +3891,28 @@ export default function Sidebar() {
                     className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+                <form onSubmit={handleYinliLogin} className="space-y-2">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">
+                      {yinliToken ? '更换隐力 API Key' : '隐力 API Key'}
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="yl_api_..."
+                      value={yinliApiKey}
+                      onChange={(e) => setYinliApiKey(e.target.value.trim())}
+                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isLoggingIn || !yinliApiKey.trim()}
+                    className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700/60 disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    <Icon icon={isLoggingIn ? LoaderCircle : Link} className={`w-3.5 h-3.5 ${isLoggingIn ? 'animate-spin' : ''}`} />
+                    {isLoggingIn ? '正在验证账户...' : yinliToken ? '验证并更换隐力账户' : '绑定隐力账户'}
+                  </button>
+                </form>
                 {yinliToken && (
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-[10px] text-slate-400 truncate max-w-[150px] inline-flex items-center gap-1">
