@@ -1,4 +1,50 @@
 import React, { useState, useEffect } from 'react';
+import {
+  AppWindow,
+  BarChart3,
+  Bot,
+  Brain,
+  BookOpen,
+  Box,
+  CircleAlert,
+  CircleCheck,
+  CircleX,
+  Clock,
+  Clipboard,
+  ClipboardList,
+  DollarSign,
+  ExternalLink,
+  Flame,
+  Globe2,
+  GraduationCap,
+  Heart,
+  Inbox,
+  Languages,
+  Lightbulb,
+  Link,
+  LoaderCircle,
+  Lock,
+  MessageCircle,
+  NotebookPen,
+  Package,
+  PencilLine,
+  Plug,
+  RefreshCw,
+  Rocket,
+  Search,
+  Settings,
+  Smartphone,
+  StopCircle,
+  Sparkles,
+  Star,
+  Target,
+  ThumbsUp,
+  Trash2,
+  UploadCloud,
+  WandSparkles,
+  Zap,
+  type LucideIcon
+} from 'lucide-react';
 import type {
   GeneratedPublishAssets,
   Keyword,
@@ -20,6 +66,10 @@ const getAuthHeaders = (token: string): Record<string, string> => {
   if (!token) return {};
   return { 'X-API-Key': token };
 };
+
+const Icon = ({ icon: IconComponent, className = 'w-3.5 h-3.5' }: { icon: LucideIcon; className?: string }) => (
+  <IconComponent className={className} aria-hidden="true" strokeWidth={2} />
+);
 
 type PostActivity = {
   viewedAt?: number;
@@ -118,6 +168,11 @@ export default function Sidebar() {
   const [analysisTotal, setAnalysisTotal] = useState(0);
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  const resetAnalysisResults = () => {
+    setAnalysisResults(null);
+    setAnalysisError(null);
+  };
 
   // 存储的自定义插件列表
   const [savedOpenVSXPlugins, setSavedOpenVSXPlugins] = useState<{ id: string; name: string }[]>([]);
@@ -2172,7 +2227,10 @@ export default function Sidebar() {
           toast.type === 'error' ? 'bg-rose-950/90 border border-rose-500/40 text-rose-300' :
           'bg-slate-900/95 border border-indigo-500/40 text-indigo-200'
         }`}>
-          <div className="font-semibold mb-0.5">{toast.type === 'success' ? '✓ 成功' : toast.type === 'error' ? '✗ 警告' : 'ℹ 提示'}</div>
+          <div className="font-semibold mb-0.5 inline-flex items-center gap-1.5">
+            <Icon icon={toast.type === 'success' ? CircleCheck : toast.type === 'error' ? CircleX : CircleAlert} className="w-3.5 h-3.5" />
+            {toast.type === 'success' ? '成功' : toast.type === 'error' ? '警告' : '提示'}
+          </div>
           <div>{toast.message}</div>
         </div>
       )}
@@ -2198,7 +2256,8 @@ export default function Sidebar() {
             }`}
             title={enableTranslation ? "点击关闭自动翻译" : "点击开启自动翻译（免费谷歌服务）"}
           >
-            <span>🌐 {enableTranslation ? '译: 开' : '译: 关'}</span>
+            <Icon icon={Languages} className="w-3 h-3" />
+            <span>{enableTranslation ? '译: 开' : '译: 关'}</span>
           </button>
 
           {currentPlatform ? (
@@ -2240,7 +2299,10 @@ export default function Sidebar() {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            🔍 本地抓取
+            <span className="inline-flex items-center gap-1.5">
+              <Icon icon={Search} className="w-3 h-3" />
+              本地抓取
+            </span>
           </button>
           <button
             onClick={() => {
@@ -2256,32 +2318,41 @@ export default function Sidebar() {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            ⚡ 隐力情报
+            <span className="inline-flex items-center gap-1.5">
+              <Icon icon={Zap} className="w-3 h-3" />
+              隐力情报
+            </span>
           </button>
         </div>
       </div>
 
       {/* Tab 导航 */}
-      <nav className="flex bg-slate-900 border-b border-slate-800/60 shrink-0 text-xs font-medium">
+      <nav className="flex overflow-x-auto bg-slate-900 border-b border-slate-800/60 shrink-0 text-xs font-medium [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <button
           onClick={() => setActiveTab('search')}
-          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'search' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          🔍 内容发现
+          <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+            <Icon icon={Search} className="w-3.5 h-3.5" />
+            内容发现
+          </span>
         </button>
         <button
           onClick={() => setActiveTab('reply')}
-          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 relative ${
+          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 relative ${
             activeTab === 'reply' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          📝 快捷回复
+          <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+            <Icon icon={PencilLine} className="w-3.5 h-3.5" />
+            快捷回复
+          </span>
           {selectedPostIds.length > 0 && (
             <span className="absolute top-1.5 right-1.5 px-1.5 py-0.1 bg-indigo-500 text-white rounded-full text-[8px] font-bold scale-90">
               {selectedPostIds.length}
@@ -2290,43 +2361,55 @@ export default function Sidebar() {
         </button>
         <button
           onClick={() => setActiveTab('memos')}
-          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'memos' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          📚 话术模板
+          <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+            <Icon icon={BookOpen} className="w-3.5 h-3.5" />
+            话术模板
+          </span>
         </button>
         <button
           onClick={() => setActiveTab('publish')}
-          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'publish'
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          🚀 资产发布
+          <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+            <Icon icon={Rocket} className="w-3.5 h-3.5" />
+            资产发布
+          </span>
         </button>
         <button
           onClick={() => setActiveTab('analysis')}
-          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'analysis' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          📊 App分析
+          <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+            <Icon icon={BarChart3} className="w-3.5 h-3.5" />
+            App分析
+          </span>
         </button>
         <button
           onClick={() => setActiveTab('settings')}
-          className={`flex-1 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'settings' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          ⚙️ 设置
+          <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap">
+            <Icon icon={Settings} className="w-3.5 h-3.5" />
+            设置
+          </span>
         </button>
       </nav>
 
@@ -2378,7 +2461,8 @@ export default function Sidebar() {
                       disabled={isLoggingIn}
                       className="w-full py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-semibold rounded-lg text-xs transition-all duration-200 active:scale-98 disabled:opacity-50 flex items-center justify-center gap-1.5"
                     >
-                      {isLoggingIn ? '正在验证 API Key...' : '🔗 绑定开发者密钥'}
+                      {!isLoggingIn && <Icon icon={Link} className="w-3.5 h-3.5" />}
+                      {isLoggingIn ? '正在验证 API Key...' : '绑定开发者密钥'}
                     </button>
                   </div>
                 </div>
@@ -2417,7 +2501,7 @@ export default function Sidebar() {
                     className="p-2 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white transition-colors active:scale-95 border border-slate-700/50 shrink-0"
                     title="刷新信号列表"
                   >
-                    {isLoadingSignals ? '⏳' : '🔄'}
+                    {isLoadingSignals ? <Icon icon={LoaderCircle} className="w-4 h-4 animate-spin" /> : <Icon icon={RefreshCw} className="w-4 h-4" />}
                   </button>
                 </div>
 
@@ -2459,7 +2543,10 @@ export default function Sidebar() {
                               </span>
                               {signal.battlefield?.name && (
                                 <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded truncate max-w-[100px]">
-                                  🎯 {signal.battlefield.name}
+                                  <span className="inline-flex items-center gap-1">
+                                    <Icon icon={Target} className="w-3 h-3" />
+                                    {signal.battlefield.name}
+                                  </span>
                                 </span>
                               )}
                             </div>
@@ -2479,7 +2566,10 @@ export default function Sidebar() {
 
                           <div className="flex items-center justify-between mt-1">
                             <span className="text-[9px] text-slate-500">
-                              🕒 捕获于: {new Date(signal.scoutedAt).toLocaleDateString()}
+                              <span className="inline-flex items-center gap-1">
+                                <Icon icon={Clock} className="w-3 h-3" />
+                                捕获于: {new Date(signal.scoutedAt).toLocaleDateString()}
+                              </span>
                             </span>
                             <div className="flex items-center gap-2">
                               <button
@@ -2498,7 +2588,10 @@ export default function Sidebar() {
                                 }}
                                 className="px-2.5 py-1 rounded bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-[10px] font-semibold transition-all active:scale-95 shadow-sm"
                               >
-                                🔗 去回复
+                                <span className="inline-flex items-center gap-1">
+                                  <Icon icon={Link} className="w-3 h-3" />
+                                  去回复
+                                </span>
                               </button>
                             </div>
                           </div>
@@ -2507,7 +2600,10 @@ export default function Sidebar() {
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center border-t border-slate-800/60 text-slate-500 text-xs text-center p-6 space-y-2">
-                      <span>📭 暂无待处理情报信号</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Icon icon={Inbox} className="w-4 h-4" />
+                        暂无待处理情报信号
+                      </span>
                       <p className="text-[10px] text-slate-600">请确保 YL 系统的 Battlefield (战场) 开启了 Scout 斥候定时扫描</p>
                     </div>
                   )}
@@ -2546,7 +2642,8 @@ export default function Sidebar() {
                     className="flex-1 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 hover:scale-[1.01] active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1.5 text-xs"
                     title="单次提取当前可见页面中的视频帖子数据"
                   >
-                    {isLoadingPosts ? '正在抓取...' : '⚡ 单次抓取'}
+                    {!isLoadingPosts && <Icon icon={Zap} className="w-3.5 h-3.5" />}
+                    {isLoadingPosts ? '正在抓取...' : '单次抓取'}
                   </button>
                   
                   <button
@@ -2559,7 +2656,8 @@ export default function Sidebar() {
                     }`}
                     title="开启后插件将自动滚屏，定时向下翻页并持续抓取帖子，解决滚动导致的元素回收和漏抓问题"
                   >
-                    {isAutoScrolling ? '🛑 停止自动抓取' : '🔄 自动滚动抓取'}
+                    <Icon icon={isAutoScrolling ? StopCircle : RefreshCw} className="w-3.5 h-3.5" />
+                    {isAutoScrolling ? '停止自动抓取' : '自动滚动抓取'}
                   </button>
                 </div>
                 
@@ -2569,7 +2667,8 @@ export default function Sidebar() {
                     disabled={isAutoScrolling}
                     className="w-full py-1.5 rounded-lg border border-slate-800 bg-slate-950/40 hover:bg-slate-900/60 hover:border-slate-700/60 text-slate-400 hover:text-slate-200 transition-all text-[11px] flex items-center justify-center gap-1 active:scale-98 disabled:opacity-40"
                   >
-                    🧹 清空列表已抓取的视频 ({posts.length} 个)
+                    <Icon icon={Trash2} className="w-3 h-3" />
+                    清空列表已抓取的视频 ({posts.length} 个)
                   </button>
                 )}
 
@@ -2662,7 +2761,8 @@ export default function Sidebar() {
                             )}
                           </div>
                           <span className="text-slate-400 text-xs font-medium truncate max-w-[140px]">
-                            👤 {post.author}
+                            <Icon icon={CircleCheck} className="w-3 h-3 shrink-0" />
+                            {post.author}
                           </span>
                         </div>
                         <p className="text-xs font-medium text-slate-200 line-clamp-2 leading-relaxed">
@@ -2687,14 +2787,14 @@ export default function Sidebar() {
                               </>
                             ) : (
                               <>
-                                <span>👍 {formatCompactNum(post.engagement.likes)}</span>
-                                <span>💬 {formatCompactNum(post.engagement.comments)}</span>
-                                <span>🔗 {formatCompactNum(post.engagement.shares)}</span>
+                                <span className="inline-flex items-center gap-1"><Icon icon={ThumbsUp} className="w-3 h-3" />{formatCompactNum(post.engagement.likes)}</span>
+                                <span className="inline-flex items-center gap-1"><Icon icon={MessageCircle} className="w-3 h-3" />{formatCompactNum(post.engagement.comments)}</span>
+                                <span className="inline-flex items-center gap-1"><Icon icon={Link} className="w-3 h-3" />{formatCompactNum(post.engagement.shares)}</span>
                               </>
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-indigo-400 font-semibold">🔥 {formatCompactNum(post.heatScore)}</span>
+                            <span className="text-indigo-400 font-semibold inline-flex items-center gap-1"><Icon icon={Flame} className="w-3 h-3" />{formatCompactNum(post.heatScore)}</span>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2703,7 +2803,7 @@ export default function Sidebar() {
                               className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
                               title="在新窗口中打开此内容"
                             >
-                              🔗
+                              <Icon icon={ExternalLink} className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
@@ -2735,7 +2835,7 @@ export default function Sidebar() {
                         className="text-slate-500 hover:text-rose-400 text-[10px] transition-colors"
                         title="取消选择"
                       >
-                        ✕ 清除选择
+                        <span className="inline-flex items-center gap-1"><Icon icon={CircleX} className="w-3 h-3" />清除选择</span>
                       </button>
                     )}
                   </div>
@@ -2756,7 +2856,10 @@ export default function Sidebar() {
                           </span>
                           {selectedYinliSignal.battlefield?.name && (
                             <span className="text-[9px] text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded max-w-[120px] truncate">
-                              🎯 {selectedYinliSignal.battlefield.name}
+                              <span className="inline-flex items-center gap-1">
+                                <Icon icon={Target} className="w-3 h-3" />
+                                {selectedYinliSignal.battlefield.name}
+                              </span>
                             </span>
                           )}
                         </div>
@@ -2792,7 +2895,7 @@ export default function Sidebar() {
                         />
                       </div>
                       <div className="flex items-center justify-between text-[9px] text-slate-500 pt-0.5">
-                        <span>👤 {selectedYinliSignal.author || '未知用户'}</span>
+                        <span className="inline-flex items-center gap-1"><Icon icon={CircleCheck} className="w-3 h-3" />{selectedYinliSignal.author || '未知用户'}</span>
                         <a 
                           href={selectedYinliSignal.url} 
                           target="_blank" 
@@ -2805,7 +2908,7 @@ export default function Sidebar() {
                     </div>
                   ) : (
                     <p className="text-xs text-slate-500 py-1">
-                      ⚠️ 您还没有在“内容发现”中选中任何隐力情报。请先在“内容发现”中选中一个目标情报以开启快捷回复。
+                      <span className="inline-flex items-start gap-1.5"><Icon icon={CircleAlert} className="w-3.5 h-3.5 mt-0.5 shrink-0" />您还没有在“内容发现”中选中任何隐力情报。请先在“内容发现”中选中一个目标情报以开启快捷回复。</span>
                     </p>
                   )}
                 </div>
@@ -2842,14 +2945,14 @@ export default function Sidebar() {
                             className="text-slate-500 hover:text-rose-400 text-[10px] font-semibold"
                             title="移出发送列表"
                           >
-                            ✕
+                            <Icon icon={CircleX} className="w-3 h-3" />
                           </button>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <p className="text-xs text-slate-500">
-                      ⚠️ 您还没有在“内容发现”中勾选任何内容。请先勾选目标以开启一键批量填充。
+                      <span className="inline-flex items-start gap-1.5"><Icon icon={CircleAlert} className="w-3.5 h-3.5 mt-0.5 shrink-0" />您还没有在“内容发现”中勾选任何内容。请先勾选目标以开启一键批量填充。</span>
                     </p>
                   )}
                 </div>
@@ -2873,7 +2976,7 @@ export default function Sidebar() {
                     onChange={(e) => setAutoSubmit(e.target.checked)}
                     className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500/40 focus:ring-offset-0 cursor-pointer"
                   />
-                  <span>🤖 自动发布并关闭标签页 (完全自动化)</span>
+                  <span className="inline-flex items-center gap-1"><Icon icon={Bot} className="w-3 h-3" />自动发布并关闭标签页 (完全自动化)</span>
                 </label>
                 <span>{replyText.length} 字</span>
               </div>
@@ -2917,10 +3020,16 @@ export default function Sidebar() {
                 <h3 className="text-xs font-semibold text-slate-300">当前关联的情报信号</h3>
                 {selectedYinliSignal ? (
                   <div className="mt-2 text-xs text-slate-400 truncate bg-slate-950/40 p-2 rounded border border-slate-900">
-                    <span className="text-slate-200 font-medium">🎯 {selectedYinliSignal.title}</span>
+                    <span className="text-slate-200 font-medium inline-flex items-center gap-1.5">
+                      <Icon icon={Target} className="w-3.5 h-3.5 shrink-0" />
+                      {selectedYinliSignal.title}
+                    </span>
                   </div>
                 ) : (
-                  <p className="mt-1 text-xs text-slate-500">⚠️ 未选中任何情报信号。请先在“内容发现”中选中一个信号。</p>
+                  <p className="mt-1 text-xs text-slate-500 inline-flex items-start gap-1.5">
+                    <Icon icon={CircleAlert} className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    未选中任何情报信号。请先在“内容发现”中选中一个信号。
+                  </p>
                 )}
               </div>
 
@@ -2929,13 +3038,13 @@ export default function Sidebar() {
                 
                 {!selectedYinliSignal ? (
                   <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs text-center p-6 space-y-2">
-                    <span className="text-lg">💡</span>
+                    <Icon icon={Lightbulb} className="w-5 h-5 text-indigo-400" />
                     <span className="font-semibold text-slate-400">专属 AI 回复策略</span>
                     <p className="text-[10px] text-slate-600 max-w-[200px] leading-relaxed">请在“内容发现”中选择一个隐力情报信号，此处将自动加载针对该贴的专属 AI 回复策略（共情表达、专家科普、引流等）。</p>
                   </div>
                 ) : !selectedYinliSignal.strategies || selectedYinliSignal.strategies.length === 0 ? (
                   <div className="flex-1 flex flex-col items-center justify-center border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs text-center p-6">
-                    <span className="text-lg">📭</span>
+                    <Icon icon={Inbox} className="w-5 h-5 text-slate-500" />
                     <span className="font-semibold text-slate-400 mt-1">暂无 AI 回复策略</span>
                     <p className="text-[10px] text-slate-600 mt-1">此信号暂未生成 AI 策略，您可在“快捷回复”中手动编写内容进行发送。</p>
                   </div>
@@ -2946,13 +3055,13 @@ export default function Sidebar() {
                       let typeLabel = 'AI 策略';
                       let typeColor = 'bg-slate-500/10 text-slate-400 border-slate-500/15';
                       if (strat.type === 'EMPATH') {
-                        typeLabel = '❤️ 共情表达型 (EMPATH)';
+                        typeLabel = '共情表达型 (EMPATH)';
                         typeColor = 'bg-rose-500/10 text-rose-450 text-rose-400 border-rose-500/15';
                       } else if (strat.type === 'EXPERT') {
-                        typeLabel = '🎓 专业科普型 (EXPERT)';
+                        typeLabel = '专业科普型 (EXPERT)';
                         typeColor = 'bg-amber-500/10 text-amber-455 text-amber-400 border-amber-500/15';
                       } else if (strat.type === 'PLUG') {
-                        typeLabel = '🔌 产品引流型 (PLUG)';
+                        typeLabel = '产品引流型 (PLUG)';
                         typeColor = 'bg-violet-500/10 text-violet-455 text-violet-400 border-violet-500/15';
                       }
                       
@@ -2960,6 +3069,7 @@ export default function Sidebar() {
                         <div key={strat.id} className="p-3 bg-slate-900/40 border border-slate-800/80 rounded-xl flex flex-col gap-2 hover:border-slate-700/60 transition-colors">
                           <div className="flex items-center justify-between">
                             <span className={`px-2 py-0.5 rounded border text-[10px] font-semibold ${typeColor}`}>
+                              <Icon icon={strat.type === 'EMPATH' ? Heart : strat.type === 'EXPERT' ? GraduationCap : strat.type === 'PLUG' ? Plug : Sparkles} className="inline w-3 h-3 mr-1 align-[-2px]" />
                               {typeLabel}
                             </span>
                           </div>
@@ -2970,7 +3080,10 @@ export default function Sidebar() {
 
                           {strat.reasoning && (
                             <div className="text-[10px] text-slate-500 bg-slate-900/30 p-2 rounded border border-slate-850/40">
-                              <span className="font-semibold block text-slate-400 mb-0.5">🧠 AI 推荐逻辑:</span>
+                              <span className="font-semibold flex items-center gap-1.5 text-slate-400 mb-0.5">
+                                <Icon icon={Brain} className="w-3 h-3" />
+                                AI 推荐逻辑:
+                              </span>
                               <span className="leading-relaxed">{strat.reasoning}</span>
                             </div>
                           )}
@@ -2983,7 +3096,7 @@ export default function Sidebar() {
                               }}
                               className="px-2.5 py-1 rounded-md bg-slate-850 hover:bg-slate-800 text-slate-300 text-[10px] transition-colors border border-slate-800"
                             >
-                              📋 仅复制
+                              <span className="inline-flex items-center gap-1"><Icon icon={Clipboard} className="w-3 h-3" />仅复制</span>
                             </button>
                             <button
                               onClick={() => {
@@ -2993,7 +3106,7 @@ export default function Sidebar() {
                               }}
                               className="px-3 py-1 rounded-md bg-indigo-650/20 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 text-[10px] font-semibold border border-indigo-500/20 transition-colors"
                             >
-                              ✍️ 载入回复并编辑
+                              <span className="inline-flex items-center gap-1"><Icon icon={PencilLine} className="w-3 h-3" />载入回复并编辑</span>
                             </button>
                           </div>
                         </div>
@@ -3058,7 +3171,7 @@ export default function Sidebar() {
                           className="text-slate-500 hover:text-rose-400 text-xs transition-colors"
                           title="删除该模板"
                         >
-                          🗑️
+                          <Icon icon={Trash2} className="w-3.5 h-3.5" />
                         </button>
                       </div>
                       <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/40 p-2 rounded-lg border border-slate-900">
@@ -3072,13 +3185,13 @@ export default function Sidebar() {
                           }}
                           className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] transition-colors"
                         >
-                          📋 仅复制
+                          <span className="inline-flex items-center gap-1"><Icon icon={Clipboard} className="w-3 h-3" />仅复制</span>
                         </button>
                         <button
                           onClick={() => handleApplyMemo(memo.content)}
                           className="px-2.5 py-1 rounded-md bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 text-[10px] font-semibold border border-indigo-500/20 transition-colors"
                         >
-                          ✍️ 载入回复
+                          <span className="inline-flex items-center gap-1"><Icon icon={PencilLine} className="w-3 h-3" />载入回复</span>
                         </button>
                       </div>
                     </div>
@@ -3091,10 +3204,10 @@ export default function Sidebar() {
 
         {/* VIEW 4: 资产发布工作台 */}
         {activeTab === 'publish' && (
-          <div className="flex flex-col h-full min-h-0 space-y-4 overflow-y-auto pr-1">
+          <div className="flex flex-col h-full min-h-0 gap-4 overflow-y-auto pr-1">
             <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
+                <div className="min-w-0">
                   <h3 className="text-xs font-semibold text-slate-200">AIF 发布资产工作台</h3>
                   <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
                     在上传页直接生成标题、简介、标签和封面，然后一键回填到 Bilibili / YouTube。
@@ -3103,13 +3216,14 @@ export default function Sidebar() {
                 <button
                   onClick={fetchPublishContext}
                   disabled={isLoadingPublishContext}
-                  className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700/60 disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700/60 disabled:opacity-50 shrink-0"
                 >
+                  <Icon icon={ClipboardList} className="w-3 h-3" />
                   {isLoadingPublishContext ? '读取中...' : '刷新页面上下文'}
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-[10px]">
+              <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2 text-[10px]">
                 <div className="bg-slate-950/60 border border-slate-900 rounded-lg p-2">
                   <span className="text-slate-500 block mb-1">当前平台</span>
                   <span className="text-slate-200 font-semibold">
@@ -3123,90 +3237,142 @@ export default function Sidebar() {
                   </span>
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  placeholder="AIF API URL"
-                  value={aifApiUrl}
-                  onChange={(e) => {
-                    setAifApiUrl(e.target.value);
-                    persistAifConfig({ aifApiUrl: e.target.value });
-                  }}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
-                />
-                <input
-                  type="password"
-                  placeholder="AIF API Key（如需要）"
-                  value={aifApiKey}
-                  onChange={(e) => {
-                    setAifApiKey(e.target.value);
-                    persistAifConfig({ aifApiKey: e.target.value });
-                  }}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
-                />
-              </div>
             </div>
 
-            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-2 shrink-0">
-              <h3 className="text-xs font-semibold text-slate-300">生成约束</h3>
-              <input
-                type="text"
-                placeholder="目标受众，如：独立开发者 / AI 工具用户"
-                value={publishAudience}
-                onChange={(e) => {
-                  setPublishAudience(e.target.value);
-                  persistAifConfig({ publishAudience: e.target.value });
-                }}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
-              />
-              <input
-                type="text"
-                placeholder="发布目标，如：提高点击率与播放转化"
-                value={publishObjective}
-                onChange={(e) => {
-                  setPublishObjective(e.target.value);
-                  persistAifConfig({ publishObjective: e.target.value });
-                }}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
-              />
-              <input
-                type="text"
-                placeholder="语气，如：专业但有传播感"
-                value={publishTone}
-                onChange={(e) => {
-                  setPublishTone(e.target.value);
-                  persistAifConfig({ publishTone: e.target.value });
-                }}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
-              />
-              <input
-                type="text"
-                placeholder="CTA，如：评论区领取模板"
-                value={publishCTA}
-                onChange={(e) => {
-                  setPublishCTA(e.target.value);
-                  persistAifConfig({ publishCTA: e.target.value });
-                }}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
-              />
-              <textarea
-                placeholder="补充上下文：视频脚本摘要、想强调的卖点、不能碰的表述、封面偏好等"
-                value={publishExtraContext}
-                onChange={(e) => {
-                  setPublishExtraContext(e.target.value);
-                  persistAifConfig({ publishExtraContext: e.target.value });
-                }}
-                rows={4}
-                className="w-full p-3 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 resize-none"
-              />
-              <button
-                onClick={handleGeneratePublishAssets}
-                disabled={isGeneratingPublishAssets || !publishContext?.isUploadPage}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 disabled:opacity-50 disabled:pointer-events-none text-xs"
-              >
-                {isGeneratingPublishAssets ? 'AIF 正在生成资产包...' : '生成发布资产包'}
-              </button>
+            <div className="grid grid-cols-1 min-[760px]:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-4 items-start">
+              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-2 min-w-0">
+                <h3 className="text-xs font-semibold text-slate-300">生成约束</h3>
+                <input
+                  type="text"
+                  placeholder="目标受众，如：独立开发者 / AI 工具用户"
+                  value={publishAudience}
+                  onChange={(e) => {
+                    setPublishAudience(e.target.value);
+                    persistAifConfig({ publishAudience: e.target.value });
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <input
+                  type="text"
+                  placeholder="发布目标，如：提高点击率与播放转化"
+                  value={publishObjective}
+                  onChange={(e) => {
+                    setPublishObjective(e.target.value);
+                    persistAifConfig({ publishObjective: e.target.value });
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <input
+                  type="text"
+                  placeholder="语气，如：专业但有传播感"
+                  value={publishTone}
+                  onChange={(e) => {
+                    setPublishTone(e.target.value);
+                    persistAifConfig({ publishTone: e.target.value });
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <input
+                  type="text"
+                  placeholder="CTA，如：评论区领取模板"
+                  value={publishCTA}
+                  onChange={(e) => {
+                    setPublishCTA(e.target.value);
+                    persistAifConfig({ publishCTA: e.target.value });
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+                <textarea
+                  placeholder="补充上下文：视频脚本摘要、想强调的卖点、不能碰的表述、封面偏好等"
+                  value={publishExtraContext}
+                  onChange={(e) => {
+                    setPublishExtraContext(e.target.value);
+                    persistAifConfig({ publishExtraContext: e.target.value });
+                  }}
+                  rows={4}
+                  className="w-full p-3 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 resize-none"
+                />
+                <button
+                  onClick={handleGeneratePublishAssets}
+                  disabled={isGeneratingPublishAssets || !publishContext?.isUploadPage}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 disabled:opacity-50 disabled:pointer-events-none text-xs"
+                >
+                  <Icon icon={WandSparkles} className="w-3.5 h-3.5" />
+                  {isGeneratingPublishAssets ? 'AIF 正在生成资产包...' : '生成发布资产包'}
+                </button>
+              </div>
+
+              <div className="bg-slate-900/40 border border-slate-800/70 rounded-xl p-3 space-y-3 min-w-0">
+                <div className="flex flex-col gap-2 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
+                  <h3 className="text-xs font-semibold text-slate-300">生成结果</h3>
+                  <button
+                    onClick={handleApplyPublishAssets}
+                    disabled={isApplyingPublishAssets || !publishAssets}
+                    className="inline-flex w-full min-[420px]:w-auto items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    <Icon icon={UploadCloud} className="w-3 h-3" />
+                    {isApplyingPublishAssets ? '回填中...' : '一键回填到上传页'}
+                  </button>
+                </div>
+
+                {!publishAssets ? (
+                  <div className="text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl p-4 text-center">
+                    生成后会在这里展示标题候选、简介、标签和封面回填状态。
+                  </div>
+                ) : (
+                  <div className="space-y-3 text-xs min-w-0">
+                    <div className="space-y-2">
+                      <span className="text-slate-400 font-semibold block">标题候选</span>
+                      {publishAssets.titles.map((title, index) => (
+                        <button
+                          key={`${title}-${index}`}
+                          onClick={() => setSelectedPublishTitle(title)}
+                          className={`w-full text-left p-2.5 rounded-lg border transition-colors break-words ${
+                            selectedPublishTitle === title
+                              ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
+                              : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          {title}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                      <span className="text-slate-400 font-semibold block mb-1">简介</span>
+                      <p className="text-slate-300 whitespace-pre-wrap leading-relaxed break-words">{publishAssets.description || '未返回简介'}</p>
+                    </div>
+
+                    <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                      <span className="text-slate-400 font-semibold block mb-1">标签</span>
+                      <p className="text-slate-300 break-words">{publishAssets.tags.length > 0 ? publishAssets.tags.join(' / ') : '未返回标签'}</p>
+                    </div>
+
+                    <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                      <span className="text-slate-400 font-semibold block mb-1">封面</span>
+                      {publishAssets.coverUrl ? (
+                        <div className="space-y-2">
+                          <img src={publishAssets.coverUrl} alt="" className="w-full rounded-lg border border-slate-800 object-cover max-h-40" />
+                          <p className="text-[10px] text-slate-500">回填时会自动尝试下载这张图并上传为封面。</p>
+                        </div>
+                      ) : (
+                        <p className="text-slate-500 break-words">{publishAssets.coverPrompt || '未返回封面图，可让 AIF 补封面 URL 或封面提示词。'}</p>
+                      )}
+                    </div>
+
+                    {publishAssets.checklist.length > 0 && (
+                      <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
+                        <span className="text-slate-400 font-semibold block mb-1">发布检查清单</span>
+                        <div className="space-y-1">
+                          {publishAssets.checklist.map((item, index) => (
+                            <p key={`${item}-${index}`} className="text-slate-300 leading-relaxed break-words">• {item}</p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="bg-slate-900/40 border border-slate-800/70 rounded-xl p-3 space-y-3 min-h-0">
@@ -3235,77 +3401,6 @@ export default function Sidebar() {
               ) : (
                 <div className="text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl p-4 text-center">
                   请切到 Bilibili 或 YouTube 上传页后，再打开这个 Tab。
-                </div>
-              )}
-            </div>
-
-            <div className="bg-slate-900/40 border border-slate-800/70 rounded-xl p-3 space-y-3 min-h-0">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-xs font-semibold text-slate-300">生成结果</h3>
-                <button
-                  onClick={handleApplyPublishAssets}
-                  disabled={isApplyingPublishAssets || !publishAssets}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  {isApplyingPublishAssets ? '回填中...' : '一键回填到上传页'}
-                </button>
-              </div>
-
-              {!publishAssets ? (
-                <div className="text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl p-4 text-center">
-                  生成后会在这里展示标题候选、简介、标签和封面回填状态。
-                </div>
-              ) : (
-                <div className="space-y-3 text-xs">
-                  <div className="space-y-2">
-                    <span className="text-slate-400 font-semibold block">标题候选</span>
-                    {publishAssets.titles.map((title, index) => (
-                      <button
-                        key={`${title}-${index}`}
-                        onClick={() => setSelectedPublishTitle(title)}
-                        className={`w-full text-left p-2.5 rounded-lg border transition-colors ${
-                          selectedPublishTitle === title
-                            ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
-                            : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700'
-                        }`}
-                      >
-                        {title}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
-                    <span className="text-slate-400 font-semibold block mb-1">简介</span>
-                    <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{publishAssets.description || '未返回简介'}</p>
-                  </div>
-
-                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
-                    <span className="text-slate-400 font-semibold block mb-1">标签</span>
-                    <p className="text-slate-300">{publishAssets.tags.length > 0 ? publishAssets.tags.join(' / ') : '未返回标签'}</p>
-                  </div>
-
-                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
-                    <span className="text-slate-400 font-semibold block mb-1">封面</span>
-                    {publishAssets.coverUrl ? (
-                      <div className="space-y-2">
-                        <img src={publishAssets.coverUrl} alt="" className="w-full rounded-lg border border-slate-800 object-cover max-h-40" />
-                        <p className="text-[10px] text-slate-500">回填时会自动尝试下载这张图并上传为封面。</p>
-                      </div>
-                    ) : (
-                      <p className="text-slate-500">{publishAssets.coverPrompt || '未返回封面图，可让 AIF 补封面 URL 或封面提示词。'}</p>
-                    )}
-                  </div>
-
-                  {publishAssets.checklist.length > 0 && (
-                    <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-900">
-                      <span className="text-slate-400 font-semibold block mb-1">发布检查清单</span>
-                      <div className="space-y-1">
-                        {publishAssets.checklist.map((item, index) => (
-                          <p key={`${item}-${index}`} className="text-slate-300 leading-relaxed">• {item}</p>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -3346,7 +3441,7 @@ export default function Sidebar() {
                       onClick={() => handleDeleteKeyword(kw.id)}
                       className="text-slate-500 hover:text-rose-400 transition-colors"
                     >
-                      ✕
+                      <Icon icon={CircleX} className="w-3 h-3" />
                     </button>
                   </div>
                 ))}
@@ -3497,13 +3592,54 @@ export default function Sidebar() {
                     }}
                     className="flex items-center gap-2.5 p-2.5 bg-slate-900/60 hover:bg-indigo-950/20 border border-slate-800/80 hover:border-indigo-500/40 rounded-xl text-left transition-all duration-200 hover:scale-[1.02] active:scale-95 group"
                   >
-                    <span className="text-lg group-hover:scale-110 transition-transform duration-200">{config.icon}</span>
+                    <span className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-indigo-300 group-hover:text-indigo-200 group-hover:border-indigo-500/40 transition-colors">
+                      <Icon icon={Globe2} className="w-4 h-4" />
+                    </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-slate-200 group-hover:text-indigo-400 transition-colors truncate">{config.name}</p>
                       <p className="text-[9px] text-slate-500 truncate">{config.baseUrl.replace('https://', '')}</p>
                     </div>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* AIF 资产生成服务设置 */}
+            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold text-slate-300">AIF 资产生成服务</h3>
+                <span className="inline-flex items-center gap-1 text-[9px] text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20 font-semibold">
+                  <Icon icon={WandSparkles} className="w-3 h-3" />
+                  资产发布使用
+                </span>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-1">AIF API URL</label>
+                  <input
+                    type="text"
+                    placeholder={`默认: ${DEFAULT_AIF_URL}`}
+                    value={aifApiUrl}
+                    onChange={(e) => {
+                      setAifApiUrl(e.target.value);
+                      persistAifConfig({ aifApiUrl: e.target.value });
+                    }}
+                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 block mb-1">AIF API Key（如需要）</label>
+                  <input
+                    type="password"
+                    placeholder="留空则不发送 Key"
+                    value={aifApiKey}
+                    onChange={(e) => {
+                      setAifApiKey(e.target.value);
+                      persistAifConfig({ aifApiKey: e.target.value });
+                    }}
+                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
               </div>
             </div>
 
@@ -3540,8 +3676,9 @@ export default function Sidebar() {
                 </div>
                 {yinliToken && (
                   <div className="flex items-center justify-between pt-1">
-                    <span className="text-[10px] text-slate-400 truncate max-w-[150px]">
-                      👤 账号: {yinliUser?.email || '已绑定用户'}
+                    <span className="text-[10px] text-slate-400 truncate max-w-[150px] inline-flex items-center gap-1">
+                      <Icon icon={CircleCheck} className="w-3 h-3 text-emerald-400" />
+                      账号: {yinliUser?.email || '已绑定用户'}
                     </span>
                     <button
                       onClick={handleYinliLogout}
@@ -3556,7 +3693,10 @@ export default function Sidebar() {
 
             {/* 项目申明 */}
             <div className="p-3 bg-indigo-950/10 border border-indigo-500/10 rounded-xl text-[10px] text-slate-500 leading-relaxed shrink-0">
-              <p className="font-semibold text-slate-400 mb-1">🔒 安全性与合规声明：</p>
+              <p className="font-semibold text-slate-400 mb-1 inline-flex items-center gap-1.5">
+                <Icon icon={Lock} className="w-3 h-3" />
+                安全性与合规声明：
+              </p>
               <p>本插件所有数据（包括检索词、回复文本及分析缓存）均安全保存在您的本地浏览器中，绝不上报或泄露。勾选自动发布后，插件会在后台打开目标网页、填充回复并发送；关闭自动发布时，只填充内容并等待您手动确认。</p>
             </div>
           </div>
@@ -3566,36 +3706,39 @@ export default function Sidebar() {
         {activeTab === 'analysis' && (
           <div className="flex flex-col h-full space-y-4 min-h-0 overflow-y-auto pr-1">
             {/* 模式选择 Tab */}
-            <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-850 shrink-0">
+            <div className="flex gap-1 overflow-x-auto bg-slate-950 p-1 rounded-xl border border-slate-850 shrink-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               <button
                 type="button"
-                onClick={() => { setAnalysisMode('appstore'); setAnalysisResults(null); setAnalysisError(null); }}
-                className={`py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'appstore' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+                onClick={() => { setAnalysisMode('appstore'); resetAnalysisResults(); }}
+                className={`flex-none min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'appstore' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
               >
-                🍎 AppStore 分析
+                <Icon icon={AppWindow} className="w-3.5 h-3.5" />
+                AppStore 分析
               </button>
               <button
                 type="button"
-                onClick={() => { setAnalysisMode('openvsx'); setAnalysisResults(null); setAnalysisError(null); }}
-                className={`py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'openvsx' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+                onClick={() => { setAnalysisMode('openvsx'); resetAnalysisResults(); }}
+                className={`flex-none min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'openvsx' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
               >
-                📦 OpenVSX 插件
+                <Icon icon={Package} className="w-3.5 h-3.5" />
+                OpenVSX 插件
               </button>
               <button
                 type="button"
-                onClick={() => { setAnalysisMode('chrome'); setAnalysisResults(null); setAnalysisError(null); }}
-                className={`py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'chrome' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+                onClick={() => { setAnalysisMode('chrome'); resetAnalysisResults(); }}
+                className={`flex-none min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'chrome' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
               >
-                🌐 Chrome 插件
+                <Icon icon={Globe2} className="w-3.5 h-3.5" />
+                Chrome 插件
               </button>
             </div>
 
             {/* 搜索控制区域 */}
             <form onSubmit={handleAnalysisSubmit} className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
-              <h3 className="text-xs font-semibold text-slate-300">
-                {analysisMode === 'appstore' && '🍎 AppStore 市场与 ASO 探针'}
-                {analysisMode === 'openvsx' && '📦 OpenVSX 插件 ASO 排名雷达'}
-                {analysisMode === 'chrome' && '🌐 Chrome 插件 ASO 排名雷达'}
+              <h3 className="text-xs font-semibold text-slate-300 inline-flex items-center gap-1.5">
+                {analysisMode === 'appstore' && <><Icon icon={AppWindow} className="w-3.5 h-3.5" />AppStore 市场与 ASO 探针</>}
+                {analysisMode === 'openvsx' && <><Icon icon={Package} className="w-3.5 h-3.5" />OpenVSX 插件 ASO 排名雷达</>}
+                {analysisMode === 'chrome' && <><Icon icon={Globe2} className="w-3.5 h-3.5" />Chrome 插件 ASO 排名雷达</>}
               </h3>
               
               <div className="flex flex-col gap-2">
@@ -3610,21 +3753,27 @@ export default function Sidebar() {
                           : '输入插件 32 位 ID (如: degimalg...'
                     }
                     value={analysisQuery}
-                    onChange={(e) => setAnalysisQuery(e.target.value)}
+                    onChange={(e) => {
+                      setAnalysisQuery(e.target.value);
+                      resetAnalysisResults();
+                    }}
                     className="flex-1 px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
                   />
                   {analysisMode === 'appstore' && (
                     <select
                       value={analysisCountry}
-                      onChange={(e) => setAnalysisCountry(e.target.value)}
+                      onChange={(e) => {
+                        setAnalysisCountry(e.target.value);
+                        resetAnalysisResults();
+                      }}
                       className="px-2 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
                     >
-                      <option value="us">美国 🇺🇸</option>
-                      <option value="cn">中国 🇨🇳</option>
-                      <option value="jp">日本 🇯🇵</option>
-                      <option value="gb">英国 🇬🇧</option>
-                      <option value="tw">中国台湾 🇹🇼</option>
-                      <option value="hk">中国香港 🇭🇰</option>
+                      <option value="us">美国</option>
+                      <option value="cn">中国</option>
+                      <option value="jp">日本</option>
+                      <option value="gb">英国</option>
+                      <option value="tw">中国台湾</option>
+                      <option value="hk">中国香港</option>
                     </select>
                   )}
                 </div>
@@ -3638,7 +3787,10 @@ export default function Sidebar() {
                         <button
                           key={idx}
                           type="button"
-                          onClick={() => setAnalysisQuery(plugin.id)}
+                          onClick={() => {
+                            setAnalysisQuery(plugin.id);
+                            resetAnalysisResults();
+                          }}
                           className="px-2 py-0.5 bg-slate-950 hover:bg-indigo-950 hover:text-indigo-300 border border-slate-850 hover:border-indigo-500/30 text-slate-300 rounded text-[9px] transition-colors truncate max-w-[120px]"
                           title={plugin.id}
                         >
@@ -3656,7 +3808,10 @@ export default function Sidebar() {
                         <button
                           key={idx}
                           type="button"
-                          onClick={() => setAnalysisQuery(plugin.id)}
+                          onClick={() => {
+                            setAnalysisQuery(plugin.id);
+                            resetAnalysisResults();
+                          }}
                           className="px-2 py-0.5 bg-slate-950 hover:bg-indigo-950 hover:text-indigo-300 border border-slate-850 hover:border-indigo-500/30 text-slate-300 rounded text-[9px] transition-colors truncate max-w-[120px]"
                           title={plugin.id}
                         >
@@ -3672,7 +3827,10 @@ export default function Sidebar() {
                     type="text"
                     placeholder="核心监测关键词 (用逗号隔开，如: git, git graph)"
                     value={analysisKeywords}
-                    onChange={(e) => setAnalysisKeywords(e.target.value)}
+                    onChange={(e) => {
+                      setAnalysisKeywords(e.target.value);
+                      resetAnalysisResults();
+                    }}
                     className="px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-500"
                   />
                 )}
@@ -3693,15 +3851,17 @@ export default function Sidebar() {
                   </>
                 ) : (
                   <>
-                    <span>🚀 开始实时商业化评估</span>
+                    <Icon icon={Rocket} className="w-3.5 h-3.5" />
+                    <span>开始实时商业化评估</span>
                   </>
                 )}
               </button>
             </form>
 
             {analysisError && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 shrink-0">
-                ⚠️ {analysisError}
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 shrink-0 flex items-start gap-2">
+                <Icon icon={CircleAlert} className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>{analysisError}</span>
               </div>
             )}
 
@@ -3716,7 +3876,7 @@ export default function Sidebar() {
                       <img src={analysisResults.icon} className="w-12 h-12 rounded-xl object-cover border border-slate-800" alt="" />
                     ) : (
                       <div className="w-12 h-12 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-center text-xl shrink-0">
-                        {analysisResults.mode === 'chrome' ? '🧩' : '📦'}
+                        <Icon icon={analysisResults.mode === 'chrome' ? Box : Package} className="w-6 h-6 text-indigo-300" />
                       </div>
                     )}
                     <div className="min-w-0 flex-1 space-y-1">
@@ -3735,7 +3895,7 @@ export default function Sidebar() {
                       <p className="text-[10px] text-slate-400 truncate font-mono">{analysisResults.query}</p>
                       <div className="flex flex-wrap gap-2 text-[9px] text-slate-500">
                         <span>下载/用户: <strong className="text-slate-300">{(analysisResults.downloads || 0).toLocaleString()}</strong></span>
-                        <span>评分: <strong className="text-slate-300">{(analysisResults.rating || 0).toFixed(1)} ★</strong> ({analysisResults.reviewCount || 0})</span>
+                        <span className="inline-flex items-center gap-1">评分: <strong className="text-slate-300 inline-flex items-center gap-1">{(analysisResults.rating || 0).toFixed(1)} <Icon icon={Star} className="w-3 h-3 text-amber-400 fill-amber-400" /></strong> ({analysisResults.reviewCount || 0})</span>
                         <span>分类: <strong className="text-indigo-400">{analysisResults.category}</strong></span>
                       </div>
                     </div>
@@ -3788,7 +3948,10 @@ export default function Sidebar() {
                   {/* 3. 关键词搜索排名 & 竞品 Benchmark */}
                   {analysisResults.kwResults && analysisResults.kwResults.length > 0 && (
                     <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
-                      <h3 className="text-xs font-bold text-slate-200">🔍 关键词搜索排名 & ASO 标杆对比</h3>
+                      <h3 className="text-xs font-bold text-slate-200 inline-flex items-center gap-1.5">
+                        <Icon icon={Search} className="w-3.5 h-3.5" />
+                        关键词搜索排名 & ASO 标杆对比
+                      </h3>
                       <div className="space-y-3">
                         {analysisResults.kwResults.map((kwRes: any, idx: number) => (
                           <div key={idx} className="bg-slate-950/60 p-3 rounded-lg border border-slate-850 space-y-2">
@@ -3839,7 +4002,10 @@ export default function Sidebar() {
                             {/* Mined SEO/ASO Keywords */}
                             {kwRes.seoKeywords && kwRes.seoKeywords.length > 0 && (
                               <div className="space-y-1 pt-1.5 border-t border-slate-900/50">
-                                <span className="text-[9px] font-semibold text-slate-500 block">💡 逆向 ASO 词频挖掘 (高能见度热词):</span>
+                                <span className="text-[9px] font-semibold text-slate-500 flex items-center gap-1.5">
+                                  <Icon icon={Lightbulb} className="w-3 h-3" />
+                                  逆向 ASO 词频挖掘 (高能见度热词):
+                                </span>
                                 <div className="flex flex-wrap gap-1">
                                   {kwRes.seoKeywords.map((item: any, sidx: number) => (
                                     <span key={sidx} className="px-1.5 py-0.2 bg-slate-900 border border-slate-850 text-slate-400 rounded text-[9px]">
@@ -3853,7 +4019,10 @@ export default function Sidebar() {
                             {/* Recommended Benchmark/Inspiration Apps */}
                             {kwRes.benchmarks && kwRes.benchmarks.length > 0 && (
                               <div className="space-y-1 pt-1.5 border-t border-slate-900/50">
-                                <span className="text-[9px] font-bold text-indigo-400 block">🎯 借鉴口碑标杆 (高频好评/SEO佳作):</span>
+                                <span className="text-[9px] font-bold text-indigo-400 flex items-center gap-1.5">
+                                  <Icon icon={Target} className="w-3 h-3" />
+                                  借鉴口碑标杆 (高频好评/SEO佳作):
+                                </span>
                                 <div className="space-y-1">
                                   {kwRes.benchmarks.map((bench: any, bidx: number) => (
                                     <div key={bidx} className="flex justify-between items-center text-[9px] text-slate-400">
@@ -3872,7 +4041,7 @@ export default function Sidebar() {
                                         </a>
                                       </div>
                                       <span className="text-slate-500 shrink-0 font-mono pl-1">
-                                        ★{bench.rating.toFixed(1)} ({bench.reviewCount}评) | {bench.downloads >= 100000 ? `${(bench.downloads/100000).toFixed(0)}y` : (bench.downloads >= 1000 ? `${(bench.downloads/1000).toFixed(0)}k` : bench.downloads)} dl
+                                        评分 {bench.rating.toFixed(1)} ({bench.reviewCount}评) | {bench.downloads >= 100000 ? `${(bench.downloads/100000).toFixed(0)}y` : (bench.downloads >= 1000 ? `${(bench.downloads/1000).toFixed(0)}k` : bench.downloads)} dl
                                       </span>
                                     </div>
                                   ))}
@@ -3889,7 +4058,10 @@ export default function Sidebar() {
                   {analysisResults.mode === 'openvsx' && analysisResults.categoryTop5 && analysisResults.categoryTop5.length > 0 && (
                     <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-xs font-bold text-slate-200">📊 分类下载排名</h3>
+                        <h3 className="text-xs font-bold text-slate-200 inline-flex items-center gap-1.5">
+                          <Icon icon={BarChart3} className="w-3.5 h-3.5" />
+                          分类下载排名
+                        </h3>
                         <span className="text-[10px] text-slate-400 font-semibold">
                           {analysisResults.categoryRank > 0 ? `第 ${analysisResults.categoryRank} 名 / 共 ${analysisResults.categoryTotal} 个` : `前 100 未上榜 / 共 ${analysisResults.categoryTotal} 个`}
                         </span>
@@ -3926,7 +4098,8 @@ export default function Sidebar() {
                   {analysisResults.actions && analysisResults.actions.length > 0 && (
                     <div className="bg-gradient-to-br from-indigo-950/20 to-slate-900/60 p-4 rounded-xl border border-indigo-500/20 space-y-3 shrink-0">
                       <h3 className="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
-                        <span>💡 ASO & 插件竞争力优化路线</span>
+                        <Icon icon={Lightbulb} className="w-3.5 h-3.5" />
+                        <span>ASO & 插件竞争力优化路线</span>
                       </h3>
                       
                       <div className="space-y-3">
@@ -3937,7 +4110,10 @@ export default function Sidebar() {
                             act.type === 'success' ? 'bg-emerald-500/5 border-emerald-500/10 text-emerald-300' :
                             'bg-slate-950/50 border-slate-850 text-slate-300'
                           }`}>
-                            <span className="font-bold block pb-1">⚡ {act.title}：</span>
+                            <span className="font-bold flex items-center gap-1.5 pb-1">
+                              <Icon icon={Zap} className="w-3 h-3" />
+                              {act.title}：
+                            </span>
                             {act.content}
                           </div>
                         ))}
@@ -3950,8 +4126,9 @@ export default function Sidebar() {
                 <div className="space-y-4 pb-4">
                   {/* 1. 赛道宏观仪表盘 */}
                   <div className="bg-gradient-to-br from-slate-900/80 to-slate-900/40 p-4 rounded-2xl border border-slate-800/80 space-y-4 shrink-0">
-                    <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1">
-                      🎯 赛道洞察: <span className="text-indigo-400">"{analysisResults.query}"</span>
+                    <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                      <Icon icon={Target} className="w-3.5 h-3.5" />
+                      赛道洞察: <span className="text-indigo-400">"{analysisResults.query}"</span>
                     </h3>
                     
                     <div className="grid grid-cols-2 gap-3">
@@ -4007,7 +4184,8 @@ export default function Sidebar() {
                     <div className="bg-gradient-to-br from-rose-950/20 to-slate-900/60 p-4 rounded-xl border border-rose-500/20 space-y-3 shrink-0">
                       <div className="flex items-center justify-between">
                         <h3 className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
-                          <span>🚨 反向突围潜力榜 (差评吸金机会)</span>
+                          <Icon icon={CircleAlert} className="w-3.5 h-3.5" />
+                          <span>反向突围潜力榜 (差评吸金机会)</span>
                         </h3>
                         <span className="text-[9px] text-slate-500">寻找高下载但口碑低的产品进行降维打击</span>
                       </div>
@@ -4036,7 +4214,7 @@ export default function Sidebar() {
                                   <span className="text-[9px] text-rose-400 font-bold bg-rose-500/10 px-1 py-0.2 rounded shrink-0">潜力指数: {opApp.oppScore}</span>
                                 </div>
                                 <p className="text-[9px] text-slate-500 flex justify-between pt-0.5">
-                                  <span>评分: {opApp.rating.toFixed(1)} ★ ({opApp.ratingCount} 个评分)</span>
+                                  <span className="inline-flex items-center gap-1">评分: {opApp.rating.toFixed(1)} <Icon icon={Star} className="w-3 h-3 text-amber-400 fill-amber-400" /> ({opApp.ratingCount} 个评分)</span>
                                 </p>
                               </div>
                             </div>
@@ -4044,7 +4222,10 @@ export default function Sidebar() {
                             {/* 痛点突破口 */}
                             {opApp.coreComplaints && opApp.coreComplaints.length > 0 && (
                               <div className="space-y-1 bg-rose-500/5 p-2 rounded border border-rose-500/10">
-                                <span className="text-[9px] font-black text-rose-300 block">💡 致命痛点切入点 (有极大重构升级空间)：</span>
+                                <span className="text-[9px] font-black text-rose-300 flex items-center gap-1.5">
+                                  <Icon icon={Lightbulb} className="w-3 h-3" />
+                                  致命痛点切入点 (有极大重构升级空间)：
+                                </span>
                                 {opApp.coreComplaints.map((c: any, cIdx: number) => (
                                   <div key={cIdx} className="text-[9.5px] leading-relaxed text-slate-400 pl-1 border-l border-rose-400/40 my-1">
                                     <span className="font-bold text-rose-400">
@@ -4075,7 +4256,10 @@ export default function Sidebar() {
                   {analysisResults.hints.length > 0 && (
                     <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-2.5 shrink-0">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-xs font-bold text-slate-200">🏷️ AppStore 搜索联想词 (ASO SEO)</h3>
+                        <h3 className="text-xs font-bold text-slate-200 inline-flex items-center gap-1.5">
+                          <Icon icon={NotebookPen} className="w-3.5 h-3.5" />
+                          AppStore 搜索联想词 (ASO SEO)
+                        </h3>
                         <span className="text-[9px] text-slate-500">反映真实用户输入词频</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5 max-h-[140px] overflow-y-auto pr-1">
@@ -4084,6 +4268,7 @@ export default function Sidebar() {
                             key={idx}
                             onClick={() => {
                               setAnalysisQuery(term);
+                              resetAnalysisResults();
                             }}
                             className="px-2.5 py-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-slate-300 hover:text-slate-100 rounded-lg text-[10px] transition-colors"
                           >
@@ -4096,7 +4281,10 @@ export default function Sidebar() {
 
                   {/* 3. 竞品 App格局深度解构 */}
                   <div className="space-y-3">
-                    <h3 className="text-xs font-bold text-slate-400">📱 竞品格局与商业模式解构</h3>
+                    <h3 className="text-xs font-bold text-slate-400 inline-flex items-center gap-1.5">
+                      <Icon icon={Smartphone} className="w-3.5 h-3.5" />
+                      竞品格局与商业模式解构
+                    </h3>
                     <div className="space-y-3">
                       {analysisResults.apps.map((app: any) => (
                         <AppDetailCard 
@@ -4114,7 +4302,7 @@ export default function Sidebar() {
             ) : (
               !analysisLoading && (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-slate-900/20 rounded-2xl border border-slate-900/60">
-                  <span className="text-4xl">📊</span>
+                  <Icon icon={BarChart3} className="w-10 h-10 text-slate-600" />
                   <div className="space-y-1">
                     <p className="text-xs font-semibold text-slate-300">暂无分析数据</p>
                     <p className="text-[10px] text-slate-500 max-w-[200px] leading-relaxed">
@@ -4183,7 +4371,7 @@ function AppDetailCard({
           <p className="text-[10px] text-slate-500 truncate">{app.developer} · {app.genre}</p>
           <div className="flex items-center justify-between text-[9px] text-slate-400 pt-1">
             <div className="flex items-center gap-1">
-              <span className="text-amber-500">★</span>
+              <Icon icon={Star} className="w-3 h-3 text-amber-500 fill-amber-500" />
               <span>{app.rating.toFixed(1)}</span>
               <span className="text-slate-500">({app.ratingCount})</span>
             </div>
@@ -4201,7 +4389,8 @@ function AppDetailCard({
           {/* 内购项列表 */}
           <div className="space-y-1.5">
             <h5 className="font-bold text-slate-400 flex items-center gap-1 text-[10px]">
-              💰 App 内购买项目 (In-App Purchases)
+              <Icon icon={DollarSign} className="w-3 h-3" />
+              App 内购买项目 (In-App Purchases)
             </h5>
             {app.inAppPurchases.length > 0 ? (
               <div className="grid grid-cols-1 gap-1 pl-1">
@@ -4220,7 +4409,10 @@ function AppDetailCard({
           {/* 精选评论分析 */}
           <div className="space-y-2">
             <h5 className="font-bold text-slate-400 flex items-center justify-between text-[10px]">
-              <span>💬 用户深度口碑与反馈 ({app.reviews.length} 条)</span>
+              <span className="inline-flex items-center gap-1">
+                <Icon icon={MessageCircle} className="w-3 h-3" />
+                用户深度口碑与反馈 ({app.reviews.length} 条)
+              </span>
               <a 
                 href={app.url} 
                 target="_blank" 
@@ -4244,7 +4436,8 @@ function AppDetailCard({
                         />
                       </span>
                       <div className="flex items-center gap-1 text-amber-500 shrink-0 font-mono text-[9px]">
-                        {'★'.repeat(rev.rating)}{'☆'.repeat(5 - rev.rating)}
+                        <Icon icon={Star} className="w-3 h-3 fill-amber-500" />
+                        {rev.rating}/5
                       </div>
                     </div>
                     <p className="text-slate-400 text-[10px] leading-relaxed whitespace-pre-wrap">

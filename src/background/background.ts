@@ -214,7 +214,7 @@ const runMarketScrape = async (request: MarketScrapeRequest): Promise<MarketScra
         };
         const getMeta = (selector: string) => document.querySelector<HTMLMetaElement>(selector)?.content || '';
         const readRating = (text: string) => {
-          const match = text.match(/(?:rating|rated|评分|平均评分)[^\d]{0,20}([0-5](?:\.\d)?)/i) || text.match(/([0-5](?:\.\d)?)\s*(?:stars?|★|星)/i);
+          const match = text.match(/(?:rating|rated|评分|平均评分)[^\d]{0,20}([0-5](?:\.\d)?)/i) || text.match(/([0-5](?:\.\d)?)\s*(?:stars?|\u2605|星)/i);
           return match ? Number(match[1]) || 0 : 0;
         };
         const readReviewCount = (text: string) => {

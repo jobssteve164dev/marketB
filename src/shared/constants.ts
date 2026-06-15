@@ -12,14 +12,14 @@ export const PLATFORM_CONFIG: Record<Platform, {
     name: 'Bilibili',
     searchUrlPattern: (keyword) => `https://search.bilibili.com/all?keyword=${encodeURIComponent(keyword)}`,
     contentScriptMatches: ['*://*.bilibili.com/*'],
-    icon: '📺',
+    icon: 'bilibili',
     baseUrl: 'https://www.bilibili.com'
   },
   youtube: {
     name: 'YouTube',
     searchUrlPattern: (keyword) => `https://www.youtube.com/results?search_query=${encodeURIComponent(keyword)}`,
     contentScriptMatches: ['*://*.youtube.com/*'],
-    icon: '▶️',
+    icon: 'youtube',
     baseUrl: 'https://www.youtube.com'
   },
   twitter: {
@@ -33,7 +33,7 @@ export const PLATFORM_CONFIG: Record<Platform, {
     name: 'Facebook',
     searchUrlPattern: (keyword) => `https://www.facebook.com/search/top?q=${encodeURIComponent(keyword)}`,
     contentScriptMatches: ['*://*.facebook.com/*'],
-    icon: '👥',
+    icon: 'facebook',
     baseUrl: 'https://www.facebook.com'
   }
 };
