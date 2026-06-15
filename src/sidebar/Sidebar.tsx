@@ -1997,6 +1997,63 @@ export default function Sidebar() {
     }
   };
 
+  const refreshYinliSignalsFromSource = async (productId: string) => {
+    if (!yinliToken || !productId) return;
+
+    setIsLoadingSignals(true);
+    setYinliSignalsError(null);
+    try {
+      const battlefieldsRes = await fetch(`${yinliApiUrl}/api/battlefield?productId=${encodeURIComponent(productId)}&status=ACTIVE`, {
+        headers: {
+          'Accept': 'application/json',
+          ...getAuthHeaders(yinliToken)
+        }
+      });
+      const battlefieldsData = await battlefieldsRes.json();
+      if (!battlefieldsRes.ok) {
+        throw new Error(battlefieldsData.error || '获取隐力监控战场失败');
+      }
+
+      const battlefields = Array.isArray(battlefieldsData.battlefields) ? battlefieldsData.battlefields : [];
+      if (battlefields.length === 0) {
+        throw new Error('当前产品还没有开启可刷新的隐力监控战场');
+      }
+
+      const scoutResults = await Promise.allSettled(
+        battlefields.map((battlefield: any) =>
+          fetch(`${yinliApiUrl}/api/battlefield/${battlefield.id}/scout`, {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/json',
+              ...getAuthHeaders(yinliToken)
+            }
+          }).then(async (res) => {
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              throw new Error(data.error || `${battlefield.name || battlefield.id} 更新失败`);
+            }
+            return data;
+          })
+        )
+      );
+
+      const succeeded = scoutResults.filter((result) => result.status === 'fulfilled').length;
+      if (succeeded === 0) {
+        const firstFailure = scoutResults.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
+        throw new Error(firstFailure?.reason?.message || '隐力信号更新失败');
+      }
+
+      showToast(`隐力信号已更新：${succeeded}/${battlefields.length} 个监控战场完成刷新`, 'success');
+      await fetchYinliSignals(productId);
+    } catch (err: any) {
+      console.error(err);
+      const message = err.message || '隐力信号更新失败';
+      setYinliSignalsError(message);
+      showToast(message, 'error');
+      setIsLoadingSignals(false);
+    }
+  };
+
   // 5. 更新信号状态 (如标记为已操作)
   const updateYinliSignalStatus = async (signalId: number, status: 'POSTED' | 'IGNORED') => {
     if (!yinliToken) return;
@@ -2667,10 +2724,10 @@ export default function Sidebar() {
                     {isLoadingYinliProducts ? <Icon icon={LoaderCircle} className="w-4 h-4 animate-spin" /> : <Icon icon={Box} className="w-4 h-4" />}
                   </button>
                   <button
-                    onClick={() => yinliActiveProductId && fetchYinliSignals(yinliActiveProductId)}
+                    onClick={() => yinliActiveProductId && refreshYinliSignalsFromSource(yinliActiveProductId)}
                     disabled={isLoadingSignals || !yinliActiveProductId}
                     className="p-2 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white transition-colors active:scale-95 border border-slate-700/50 shrink-0"
-                    title="刷新信号列表"
+                    title="刷新隐力信号"
                   >
                     {isLoadingSignals ? <Icon icon={LoaderCircle} className="w-4 h-4 animate-spin" /> : <Icon icon={RefreshCw} className="w-4 h-4" />}
                   </button>
