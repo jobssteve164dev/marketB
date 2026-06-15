@@ -60,7 +60,8 @@ import { PLATFORM_CONFIG, DEFAULT_MEMO_TEMPLATES } from '../shared/constants.js'
 const DEFAULT_YINLI_URL = (import.meta as any).env?.VITE_YINLI_API_URL || 
   ((import.meta as any).env?.DEV ? 'http://localhost:3000' : 'https://seevoid.com');
 const DEFAULT_AIF_URL = (import.meta as any).env?.VITE_AIF_API_URL ||
-  ((import.meta as any).env?.DEV ? 'http://localhost:8787' : 'https://aif.seevoid.com');
+  ((import.meta as any).env?.DEV ? 'http://localhost:8787' : 'https://possibility.work');
+const LEGACY_AIF_URLS = new Set(['https://aif.seevoid.com', 'https://seevoid.com']);
 
 const getAuthHeaders = (token: string): Record<string, string> => {
   if (!token) return {};
@@ -188,8 +189,20 @@ export default function Sidebar() {
       'there', 'their', 'they', 'we', 'our', 'will', 'this', 'get', 'like', 'good', 
       'great', 'love', 'use', 'really', 'very', 'more', 'when', 'some', 'out', 'all',
       'one', 'only', 'than', 'into', 'even', 'make', 'also', 'after', 'been', 'which',
-      'extension', 'chrome', 'plugin', 'software', 'tool', 'helper', 'vscode', 'editor'
+      'marketplace', 'search', 'name', 'names', 'tag', 'tags', 'category', 'categories', 'description',
+      'descriptions', 'compatible', 'download', 'downloads', 'install', 'installs', 'all',
+      'free'
     ];
+    const weakGenericWords = new Set([
+      'extension', 'extensions', 'chrome', 'plugin', 'plugins', 'software', 'tool', 'tools',
+      'helper', 'vscode', 'visual', 'studio', 'code', 'editor', 'editors', 'compatible',
+      'open', 'source'
+    ]);
+    const enNoiseWords = new Set([
+      'editorssearch', 'descriptionall', 'categoriesall', 'tagsall', 'namesearch',
+      'searchall', 'extensionssearch', 'compatibleeditors'
+    ]);
+    const meaningfulTermPattern = /(ai|agent|chat|completion|autocomplete|debug|debugger|test|testing|lint|linting|format|formatter|review|security|deploy|database|sql|api|rest|graphql|git|github|docker|kubernetes|python|typescript|javascript|java|rust|go|php|markdown|json|yaml|css|html|react|vue|svelte|tailwind|snippet|terminal|notebook|theme|preview|diagram|docs|documentation|translate|localization|data|monitor|log|search|workflow|automation|refactor|migration|schema|prompt|model|copilot|assistant)/i;
     
     const zhStopwords = [
       '的', '了', '是', '在', '我', '你', '他', '她', '它', '这', '那', '和', '有', '无', 
@@ -215,29 +228,38 @@ export default function Sidebar() {
           }
         });
       } else {
-        const cleanText = text.replace(/[^a-zA-Z\s]/g, '').toLowerCase();
-        const words = cleanText.split(/\s+/).filter(w => w.length > 2);
-        
-        // 1-gram
-        words.forEach(w => {
-          if (!enStopwords.includes(w)) {
-            phraseCounts[w] = (phraseCounts[w] || 0) + 1.2;
-          }
-        });
-        // 2-gram
+        const cleanText = text
+          .replace(/GitHub/gi, 'Github')
+          .replace(/([a-z])([A-Z])/g, '$1 $2')
+          .replace(/[^a-zA-Z\s]/g, ' ')
+          .toLowerCase();
+        const words = cleanText
+          .split(/\s+/)
+          .filter(w => (w.length > 2 || w === 'ai') && !enNoiseWords.has(w));
+
+        const recordPhrase = (parts: string[], weight: number) => {
+          if (parts.length < 2) return;
+          const phrase = parts.join(' ');
+          if (phrase.length < 7 || phrase.length > 48) return;
+          if (!meaningfulTermPattern.test(phrase)) return;
+          if (parts.some(part => enStopwords.includes(part) || enNoiseWords.has(part))) return;
+          if (parts.every(part => enStopwords.includes(part) || enNoiseWords.has(part))) return;
+          if (parts.every(part => weakGenericWords.has(part))) return;
+          phraseCounts[phrase] = (phraseCounts[phrase] || 0) + weight;
+        };
+
         for (let i = 0; i < words.length - 1; i++) {
-          const w1 = words[i];
-          const w2 = words[i+1];
-          if (!enStopwords.includes(w1) && !enStopwords.includes(w2)) {
-            const phrase = `${w1} ${w2}`;
-            phraseCounts[phrase] = (phraseCounts[phrase] || 0) + 1.0;
-          }
+          recordPhrase([words[i], words[i + 1]], 1.0);
+        }
+        for (let i = 0; i < words.length - 2; i++) {
+          recordPhrase([words[i], words[i + 1], words[i + 2]], 1.4);
         }
       }
     });
 
     return Object.entries(phraseCounts)
       .sort((a, b) => b[1] - a[1])
+      .filter(([, count]) => count >= 1)
       .slice(0, 8)
       .map(e => ({ word: e[0], count: Math.round(e[1]) }));
   };
@@ -348,10 +370,9 @@ export default function Sidebar() {
             .sort((a: { kpiScore: number }, b: { kpiScore: number }) => b.kpiScore - a.kpiScore)
             .slice(0, 3);
 
-          // 关键词共性 ASO 挖掘：提取前 10 个排名最前插件的文案
+          // 关键词共性 ASO 挖掘：只提取详情描述，避免把竞品品牌名和市场字段当成关键词。
           const top10Texts: string[] = [];
           list.slice(0, 10).forEach((comp: any) => {
-            if (comp.name) top10Texts.push(comp.name);
             if (comp.description) top10Texts.push(comp.description);
           });
           const isChinese = ['cn', 'tw', 'hk'].includes(analysisCountry) || /[\u4e00-\u9fff]/.test(kw);
@@ -607,7 +628,6 @@ export default function Sidebar() {
               rating: compDetail.rating || searchItem.rating || 0,
               reviewCount: compDetail.reviewCount || searchItem.reviewCount || 0
             });
-            top3Texts.push(compDetail.name || searchItem.name || '');
             if (compDetail.description || searchItem.description) top3Texts.push(compDetail.description || searchItem.description || '');
           }
 
@@ -1133,7 +1153,7 @@ export default function Sidebar() {
   const [isInjecting, setIsInjecting] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(true); // 是否开启自动发布评论并自动关闭标签页
 
-  // AIF 资产发布工作台
+  // 博思万象资产发布工作台
   const [aifApiUrl, setAifApiUrl] = useState(DEFAULT_AIF_URL);
   const [aifApiKey, setAifApiKey] = useState('');
   const [publishObjective, setPublishObjective] = useState('提高点击率与播放转化');
@@ -1259,13 +1279,13 @@ export default function Sidebar() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data?.error || 'AIF 生成资产失败');
+        throw new Error(data?.error || '博思万象生成资产失败');
       }
 
       const normalized = normalizeGeneratedAssets(data);
       setPublishAssets(normalized.assets);
       setSelectedPublishTitle(normalized.assets.titles[0] || '');
-      showToast('AIF 资产包已生成，可直接回填到上传页', 'success');
+      showToast('博思万象资产包已生成，可直接回填到上传页', 'success');
     } catch (err: any) {
       console.error(err);
       showToast(err.message || '生成资产失败', 'error');
@@ -1364,7 +1384,13 @@ export default function Sidebar() {
           setYinliActiveProductId(result.yinliActiveProductId);
         }
         if (result.aifApiUrl !== undefined) {
-          setAifApiUrl(result.aifApiUrl);
+          const storedAifApiUrl = String(result.aifApiUrl || '').trim();
+          if (!storedAifApiUrl || LEGACY_AIF_URLS.has(storedAifApiUrl.replace(/\/$/, ''))) {
+            setAifApiUrl(DEFAULT_AIF_URL);
+            chrome.storage.local.set({ aifApiUrl: DEFAULT_AIF_URL });
+          } else {
+            setAifApiUrl(storedAifApiUrl);
+          }
         }
         if (result.aifApiKey !== undefined) {
           setAifApiKey(result.aifApiKey);
@@ -2327,10 +2353,10 @@ export default function Sidebar() {
       </div>
 
       {/* Tab 导航 */}
-      <nav className="flex overflow-x-auto bg-slate-900 border-b border-slate-800/60 shrink-0 text-xs font-medium [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <nav className="flex flex-wrap bg-slate-900 border-b border-slate-800/60 shrink-0 text-xs font-medium">
         <button
           onClick={() => setActiveTab('search')}
-          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-1 basis-[82px] min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'search' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2343,7 +2369,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={() => setActiveTab('reply')}
-          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 relative ${
+          className={`flex-1 basis-[82px] min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 relative ${
             activeTab === 'reply' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2361,7 +2387,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={() => setActiveTab('memos')}
-          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-1 basis-[82px] min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'memos' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2374,7 +2400,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={() => setActiveTab('publish')}
-          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-1 basis-[82px] min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'publish'
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2387,7 +2413,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={() => setActiveTab('analysis')}
-          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-1 basis-[82px] min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'analysis' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -2400,7 +2426,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={() => setActiveTab('settings')}
-          className={`flex-none min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
+          className={`flex-1 basis-[82px] min-w-[82px] px-2 py-2.5 text-center border-b-2 transition-all duration-200 ${
             activeTab === 'settings' 
               ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5' 
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -3208,7 +3234,7 @@ export default function Sidebar() {
             <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
               <div className="flex flex-col gap-3 min-[420px]:flex-row min-[420px]:items-start min-[420px]:justify-between">
                 <div className="min-w-0">
-                  <h3 className="text-xs font-semibold text-slate-200">AIF 发布资产工作台</h3>
+                  <h3 className="text-xs font-semibold text-slate-200">博思万象发布资产工作台</h3>
                   <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
                     在上传页直接生成标题、简介、标签和封面，然后一键回填到 Bilibili / YouTube。
                   </p>
@@ -3298,7 +3324,7 @@ export default function Sidebar() {
                   className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white font-semibold transition-all duration-200 shadow-md shadow-indigo-500/10 disabled:opacity-50 disabled:pointer-events-none text-xs"
                 >
                   <Icon icon={WandSparkles} className="w-3.5 h-3.5" />
-                  {isGeneratingPublishAssets ? 'AIF 正在生成资产包...' : '生成发布资产包'}
+                  {isGeneratingPublishAssets ? '博思万象正在生成资产包...' : '生成发布资产包'}
                 </button>
               </div>
 
@@ -3356,7 +3382,7 @@ export default function Sidebar() {
                           <p className="text-[10px] text-slate-500">回填时会自动尝试下载这张图并上传为封面。</p>
                         </div>
                       ) : (
-                        <p className="text-slate-500 break-words">{publishAssets.coverPrompt || '未返回封面图，可让 AIF 补封面 URL 或封面提示词。'}</p>
+                        <p className="text-slate-500 break-words">{publishAssets.coverPrompt || '未返回封面图，可让博思万象补封面 URL 或封面提示词。'}</p>
                       )}
                     </div>
 
@@ -3604,10 +3630,10 @@ export default function Sidebar() {
               </div>
             </div>
 
-            {/* AIF 资产生成服务设置 */}
+            {/* 博思万象资产生成服务设置 */}
             <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-xs font-semibold text-slate-300">AIF 资产生成服务</h3>
+                <h3 className="text-xs font-semibold text-slate-300">博思万象资产生成服务</h3>
                 <span className="inline-flex items-center gap-1 text-[9px] text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20 font-semibold">
                   <Icon icon={WandSparkles} className="w-3 h-3" />
                   资产发布使用
@@ -3615,7 +3641,7 @@ export default function Sidebar() {
               </div>
               <div className="space-y-2">
                 <div>
-                  <label className="text-[10px] text-slate-400 block mb-1">AIF API URL</label>
+                  <label className="text-[10px] text-slate-400 block mb-1">博思万象 API URL</label>
                   <input
                     type="text"
                     placeholder={`默认: ${DEFAULT_AIF_URL}`}
@@ -3628,7 +3654,7 @@ export default function Sidebar() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-400 block mb-1">AIF API Key（如需要）</label>
+                  <label className="text-[10px] text-slate-400 block mb-1">博思万象 API Key（如需要）</label>
                   <input
                     type="password"
                     placeholder="留空则不发送 Key"
@@ -3706,11 +3732,11 @@ export default function Sidebar() {
         {activeTab === 'analysis' && (
           <div className="flex flex-col h-full space-y-4 min-h-0 overflow-y-auto pr-1">
             {/* 模式选择 Tab */}
-            <div className="flex gap-1 overflow-x-auto bg-slate-950 p-1 rounded-xl border border-slate-850 shrink-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex flex-wrap gap-1 bg-slate-950 p-1 rounded-xl border border-slate-850 shrink-0">
               <button
                 type="button"
                 onClick={() => { setAnalysisMode('appstore'); resetAnalysisResults(); }}
-                className={`flex-none min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'appstore' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 basis-[108px] min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'appstore' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 <Icon icon={AppWindow} className="w-3.5 h-3.5" />
                 AppStore 分析
@@ -3718,7 +3744,7 @@ export default function Sidebar() {
               <button
                 type="button"
                 onClick={() => { setAnalysisMode('openvsx'); resetAnalysisResults(); }}
-                className={`flex-none min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'openvsx' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 basis-[108px] min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'openvsx' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 <Icon icon={Package} className="w-3.5 h-3.5" />
                 OpenVSX 插件
@@ -3726,7 +3752,7 @@ export default function Sidebar() {
               <button
                 type="button"
                 onClick={() => { setAnalysisMode('chrome'); resetAnalysisResults(); }}
-                className={`flex-none min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'chrome' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 basis-[108px] min-w-[108px] inline-flex items-center justify-center gap-1.5 px-2 py-2 text-[10px] font-bold rounded-lg transition-all ${analysisMode === 'chrome' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-950/50' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 <Icon icon={Globe2} className="w-3.5 h-3.5" />
                 Chrome 插件

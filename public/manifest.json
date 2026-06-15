@@ -51,6 +51,8 @@
     "https://*/*",
     "*://seevoid.com/*",
     "*://*.seevoid.com/*",
+    "https://possibility.work/*",
+    "https://*.possibility.work/*",
     "*://*.apple.com/*",
     "https://open-vsx.org/*",
     "https://chromewebstore.google.com/*"
