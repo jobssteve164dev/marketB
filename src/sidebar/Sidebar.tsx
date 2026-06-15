@@ -1167,6 +1167,8 @@ export default function Sidebar() {
   const [isLoadingPublishContext, setIsLoadingPublishContext] = useState(false);
   const [isGeneratingPublishAssets, setIsGeneratingPublishAssets] = useState(false);
   const [isApplyingPublishAssets, setIsApplyingPublishAssets] = useState(false);
+  const [isTestingAifConnection, setIsTestingAifConnection] = useState(false);
+  const [aifConnectionStatus, setAifConnectionStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   
   // 当前浏览器活动 Tab 的环境状态
@@ -1184,6 +1186,93 @@ export default function Sidebar() {
   const persistAifConfig = (payload: Record<string, any>) => {
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       chrome.storage.local.set(payload);
+    }
+  };
+
+  const handleTestAifConnection = async () => {
+    const baseUrl = (aifApiUrl.trim() || DEFAULT_AIF_URL).replace(/\/$/, '');
+    const identityCode = aifApiKey.trim();
+
+    if (!identityCode) {
+      const message = '请先填写博思万象设置中的唯一身份代码';
+      setAifConnectionStatus({ type: 'error', message });
+      showToast(message, 'error');
+      return;
+    }
+
+    setIsTestingAifConnection(true);
+    setAifConnectionStatus({ type: 'info', message: '正在验证博思万象连接...' });
+
+    const headers = {
+      'Accept': 'application/json',
+      'X-API-Key': identityCode
+    };
+    const endpoints = [
+      '/api/marketing/publish-assets/health',
+      '/api/marketing/publish-assets/verify',
+      '/api/health',
+      '/health'
+    ];
+
+    try {
+      let sawApiEndpoint = false;
+      let lastError = '';
+
+      for (const endpoint of endpoints) {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+        try {
+          const res = await fetch(`${baseUrl}${endpoint}`, {
+            method: 'GET',
+            headers,
+            signal: controller.signal
+          });
+          window.clearTimeout(timeoutId);
+
+          if (res.status === 404) {
+            continue;
+          }
+
+          sawApiEndpoint = true;
+          const contentType = res.headers.get('content-type') || '';
+          const data = contentType.includes('application/json') ? await res.json().catch(() => null) : null;
+
+          if (res.ok) {
+            const message = data?.message || data?.status || '博思万象连接验证通过，唯一身份代码可用';
+            setAifConnectionStatus({ type: 'success', message });
+            showToast('博思万象连接验证通过', 'success');
+            return;
+          }
+
+          if (res.status === 401 || res.status === 403) {
+            throw new Error(data?.error || data?.message || '唯一身份代码无效或无权使用博思万象资产生成能力');
+          }
+
+          lastError = data?.error || data?.message || `验证接口返回 ${res.status}`;
+        } catch (err: any) {
+          window.clearTimeout(timeoutId);
+          if (err?.name === 'AbortError') {
+            lastError = '连接验证超时，请检查域名或网络';
+          } else {
+            lastError = err?.message || '连接验证失败';
+          }
+          if (!lastError.includes('Failed to fetch')) {
+            throw new Error(lastError);
+          }
+        }
+      }
+
+      throw new Error(
+        sawApiEndpoint
+          ? lastError || '博思万象验证未通过'
+          : '未找到博思万象连接验证接口，请确认域名是否正确或服务是否已发布验证端点'
+      );
+    } catch (err: any) {
+      const message = err?.message || '博思万象连接验证失败';
+      setAifConnectionStatus({ type: 'error', message });
+      showToast(message, 'error');
+    } finally {
+      setIsTestingAifConnection(false);
     }
   };
 
@@ -3648,24 +3737,46 @@ export default function Sidebar() {
                     value={aifApiUrl}
                     onChange={(e) => {
                       setAifApiUrl(e.target.value);
+                      setAifConnectionStatus(null);
                       persistAifConfig({ aifApiUrl: e.target.value });
                     }}
                     className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-400 block mb-1">博思万象 API Key（如需要）</label>
+                  <label className="text-[10px] text-slate-400 block mb-1">唯一身份代码</label>
                   <input
                     type="password"
-                    placeholder="留空则不发送 Key"
+                    placeholder="粘贴博思万象设置中的唯一身份代码"
                     value={aifApiKey}
                     onChange={(e) => {
                       setAifApiKey(e.target.value);
+                      setAifConnectionStatus(null);
                       persistAifConfig({ aifApiKey: e.target.value });
                     }}
                     className="w-full px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={handleTestAifConnection}
+                  disabled={isTestingAifConnection}
+                  className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700/60 disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  <Icon icon={isTestingAifConnection ? LoaderCircle : Link} className={`w-3.5 h-3.5 ${isTestingAifConnection ? 'animate-spin' : ''}`} />
+                  {isTestingAifConnection ? '正在验证连接...' : '验证博思万象连接'}
+                </button>
+                {aifConnectionStatus && (
+                  <div className={`text-[10px] leading-relaxed rounded-lg border px-2.5 py-2 ${
+                    aifConnectionStatus.type === 'success'
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                      : aifConnectionStatus.type === 'error'
+                        ? 'bg-rose-500/10 border-rose-500/20 text-rose-300'
+                        : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300'
+                  }`}>
+                    {aifConnectionStatus.message}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -4026,19 +4137,25 @@ export default function Sidebar() {
                             )}
 
                             {/* Mined SEO/ASO Keywords */}
-                            {kwRes.seoKeywords && kwRes.seoKeywords.length > 0 && (
+                            {kwRes.seoKeywords && (
                               <div className="space-y-1 pt-1.5 border-t border-slate-900/50">
                                 <span className="text-[9px] font-semibold text-slate-500 flex items-center gap-1.5">
                                   <Icon icon={Lightbulb} className="w-3 h-3" />
                                   逆向 ASO 词频挖掘 (高能见度热词):
                                 </span>
-                                <div className="flex flex-wrap gap-1">
-                                  {kwRes.seoKeywords.map((item: any, sidx: number) => (
-                                    <span key={sidx} className="px-1.5 py-0.2 bg-slate-900 border border-slate-850 text-slate-400 rounded text-[9px]">
-                                      {item.word} ({item.count})
-                                    </span>
-                                  ))}
-                                </div>
+                                {kwRes.seoKeywords.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {kwRes.seoKeywords.map((item: any, sidx: number) => (
+                                      <span key={sidx} className="px-1.5 py-0.2 bg-slate-900 border border-slate-850 text-slate-400 rounded text-[9px]">
+                                        {item.word} ({item.count})
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-[9px] leading-relaxed text-slate-500 bg-slate-900/60 border border-slate-850 rounded-lg px-2 py-1.5">
+                                    已过滤竞品名称、市场字段和页面拼接噪音；本次结果没有识别到可用于标题、标签或描述优化的连续产品关键词。
+                                  </p>
+                                )}
                               </div>
                             )}
 
