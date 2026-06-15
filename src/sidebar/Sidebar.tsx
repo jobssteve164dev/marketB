@@ -3503,9 +3503,9 @@ export default function Sidebar() {
                             chrome.storage.local.set({ savedOpenVSXPlugins: updated });
                           }
                         }}
-                        className="text-slate-500 hover:text-rose-400 font-bold"
+                        className="text-slate-500 hover:text-rose-400"
                       >
-                        ×
+                        <Icon icon={CircleX} className="w-3 h-3" />
                       </button>
                     </span>
                   ))}
@@ -3566,9 +3566,9 @@ export default function Sidebar() {
                             chrome.storage.local.set({ savedChromePlugins: updated });
                           }
                         }}
-                        className="text-slate-500 hover:text-rose-400 font-bold"
+                        className="text-slate-500 hover:text-rose-400"
                       >
-                        ×
+                        <Icon icon={CircleX} className="w-3 h-3" />
                       </button>
                     </span>
                   ))}
