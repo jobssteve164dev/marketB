@@ -56,6 +56,13 @@ import type {
   YinliSignal
 } from '../shared/types.js';
 import { PLATFORM_CONFIG, DEFAULT_MEMO_TEMPLATES } from '../shared/constants.js';
+import {
+  getAifAccountBadge,
+  getAifAccountLabel,
+  getMissingStrategySignalIds,
+  getYinliSignalReplyUrl,
+  normalizeAifAccount
+} from './yinli-helpers.js';
 
 const DEFAULT_YINLI_URL = (import.meta as any).env?.VITE_YINLI_API_URL || 
   ((import.meta as any).env?.DEV ? 'http://localhost:3000' : 'https://seevoid.com');
@@ -79,73 +86,6 @@ const normalizeComparableUrl = (url: string) => {
   } catch {
     return url.split('#')[0].split('?')[0].replace(/\/$/, '');
   }
-};
-
-const isObjectRecord = (value: unknown): value is Record<string, any> => {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-};
-
-const hasAccountField = (value: Record<string, any>) => {
-  return [
-    'email',
-    'name',
-    'displayName',
-    'nickname',
-    'username',
-    'apiKey',
-    'userId',
-    'id',
-    'credits',
-    'remainingCredits',
-    'quota',
-    'plan',
-    'level'
-  ].some((key) => value[key] !== undefined && value[key] !== null && value[key] !== '');
-};
-
-const normalizeAifAccount = (payload: any) => {
-  const candidates = [
-    payload?.user,
-    payload?.account,
-    payload?.profile,
-    payload?.customer,
-    payload?.data?.user,
-    payload?.data?.account,
-    payload?.data?.profile,
-    payload?.data?.customer,
-    payload?.data,
-    payload?.result?.user,
-    payload?.result?.account,
-    payload?.result?.profile,
-    payload?.result
-  ];
-
-  const account = candidates.find((candidate) => isObjectRecord(candidate) && hasAccountField(candidate));
-  return account || (isObjectRecord(payload) && hasAccountField(payload) ? payload : null);
-};
-
-const getAifAccountLabel = (account: any) => {
-  if (!account) return '已连接账户';
-  const apiKey = typeof account.apiKey === 'string' ? account.apiKey : '';
-  if (account.email) return account.email;
-  if (account.name) return account.name;
-  if (account.displayName) return account.displayName;
-  if (account.nickname) return account.nickname;
-  if (account.username) return account.username;
-  if (account.userId) return `用户 ${account.userId}`;
-  if (account.id) return `用户 ${account.id}`;
-  if (apiKey) return `身份代码 ...${apiKey.slice(-6)}`;
-  return '已连接账户';
-};
-
-const getAifAccountBadge = (account: any) => {
-  if (!account) return '';
-  if (account.credits !== undefined) return `${account.credits} 积分`;
-  if (account.remainingCredits !== undefined) return `${account.remainingCredits} 积分`;
-  if (account.quota !== undefined) return `${account.quota} 额度`;
-  if (account.plan) return account.plan;
-  if (account.level) return account.level;
-  return '';
 };
 
 type PostActivity = {
@@ -1292,71 +1232,45 @@ export default function Sidebar() {
       'Accept': 'application/json',
       'X-API-Key': identityCode
     };
-    const endpoints = [
-      '/api/marketing/publish-assets/verify',
-      '/api/marketing/publish-assets/health',
-      '/api/health',
-      '/health'
-    ];
+    const endpoint = '/api/marketing/publish-assets/verify';
 
     try {
-      let sawApiEndpoint = false;
-      let lastError = '';
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${baseUrl}${endpoint}`, {
+        method: 'GET',
+        headers,
+        signal: controller.signal
+      });
+      window.clearTimeout(timeoutId);
 
-      for (const endpoint of endpoints) {
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-        try {
-          const res = await fetch(`${baseUrl}${endpoint}`, {
-            method: 'GET',
-            headers,
-            signal: controller.signal
-          });
-          window.clearTimeout(timeoutId);
+      const contentType = res.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await res.json().catch(() => null) : null;
 
-          if (res.status === 404) {
-            continue;
-          }
-
-          sawApiEndpoint = true;
-          const contentType = res.headers.get('content-type') || '';
-          const data = contentType.includes('application/json') ? await res.json().catch(() => null) : null;
-
-          if (res.ok) {
-            const message = data?.message || data?.status || '博思万象连接验证通过，唯一身份代码可用';
-            const connectedAccount = normalizeAifAccount(data);
-            setAifConnectionStatus({ type: 'success', message });
-            setAifConnectedUser(connectedAccount);
-            persistAifConfig({ aifConnectedUser: connectedAccount });
-            showToast('博思万象连接验证通过', 'success');
-            return;
-          }
-
-          if (res.status === 401 || res.status === 403) {
-            throw new Error(data?.error || data?.message || '唯一身份代码无效或无权使用博思万象资产生成能力');
-          }
-
-          lastError = data?.error || data?.message || `验证接口返回 ${res.status}`;
-        } catch (err: any) {
-          window.clearTimeout(timeoutId);
-          if (err?.name === 'AbortError') {
-            lastError = '连接验证超时，请检查域名或网络';
-          } else {
-            lastError = err?.message || '连接验证失败';
-          }
-          if (!lastError.includes('Failed to fetch')) {
-            throw new Error(lastError);
-          }
-        }
+      if (res.ok) {
+        const connectedAccount = normalizeAifAccount(data, identityCode);
+        const label = getAifAccountLabel(connectedAccount);
+        const badge = getAifAccountBadge(connectedAccount);
+        const message = badge ? `博思万象已连接：${label}（${badge}）` : `博思万象已连接：${label}`;
+        setAifConnectionStatus({ type: 'success', message });
+        setAifConnectedUser(connectedAccount);
+        persistAifConfig({ aifConnectedUser: connectedAccount });
+        showToast('博思万象连接已确认', 'success');
+        return;
       }
 
-      throw new Error(
-        sawApiEndpoint
-          ? lastError || '博思万象验证未通过'
-          : '未找到博思万象连接验证接口，请确认域名是否正确或服务是否已发布验证端点'
-      );
+      if (res.status === 404) {
+        throw new Error('未找到博思万象连接验证接口，请确认域名是否正确或服务是否已发布验证端点');
+      }
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(data?.error || data?.message || '唯一身份代码无效或无权使用博思万象资产生成能力');
+      }
+
+      throw new Error(data?.error || data?.message || `验证接口返回 ${res.status}`);
     } catch (err: any) {
-      const message = err?.message || '博思万象连接验证失败';
+      const message = err?.name === 'AbortError'
+        ? '连接验证超时，请检查域名或网络'
+        : err?.message || '博思万象连接验证失败';
       setAifConnectionStatus({ type: 'error', message });
       setAifConnectedUser(null);
       showToast(message, 'error');
@@ -2053,8 +1967,8 @@ export default function Sidebar() {
   };
 
   // 4. 拉取待办信号和锦囊列表
-  const fetchYinliSignals = async (productId: string) => {
-    if (!yinliToken || !productId) return;
+  const fetchYinliSignals = async (productId: string): Promise<YinliSignal[]> => {
+    if (!yinliToken || !productId) return [];
 
     setIsLoadingSignals(true);
     setYinliSignalsError(null);
@@ -2070,18 +1984,58 @@ export default function Sidebar() {
 
       const signals = Array.isArray(data.signals) ? data.signals : [];
       setYinliSignals(signals);
+
+      if (selectedYinliSignal) {
+        const refreshedSignal = signals.find((signal: YinliSignal) => signal.id === selectedYinliSignal.id);
+        if (refreshedSignal) {
+          const previousStrategyContent = selectedYinliSignal.strategies?.[0]?.content || '';
+          const nextStrategyContent = refreshedSignal.strategies?.[0]?.content || '';
+          setSelectedYinliSignal(refreshedSignal);
+          if (nextStrategyContent && (!replyText.trim() || replyText === previousStrategyContent)) {
+            setReplyText(nextStrategyContent);
+          }
+        }
+      }
       
       if (signals.length === 0) {
         showToast('该产品下暂无待回复的隐力信号', 'info');
       }
+      return signals;
     } catch (err: any) {
       console.error(err);
       const message = err.message || '获取信号数据失败';
       setYinliSignalsError(message);
       showToast(message, 'error');
+      return [];
     } finally {
       setIsLoadingSignals(false);
     }
+  };
+
+  const generateMissingYinliStrategies = async (signals: YinliSignal[]) => {
+    const signalIds = Array.from(new Set(getMissingStrategySignalIds(signals)));
+    if (!yinliToken || signalIds.length === 0) return { requested: 0, generated: 0, failures: 0 };
+
+    const res = await fetch(`${yinliApiUrl}/api/strategy/batch`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(yinliToken)
+      },
+      body: JSON.stringify({ signalIds })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || '隐力回复锦囊生成失败');
+    }
+
+    const results = Array.isArray(data.results) ? data.results : [];
+    return {
+      requested: signalIds.length,
+      generated: results.reduce((sum: number, item: any) => sum + (item.count || 0), 0),
+      failures: results.filter((item: any) => item.status === 'failed').length
+    };
   };
 
   const refreshYinliSignalsFromSource = async (productId: string) => {
@@ -2130,8 +2084,23 @@ export default function Sidebar() {
         throw new Error(firstFailure?.reason?.message || '隐力信号更新失败');
       }
 
-      showToast(`隐力信号已更新：${succeeded}/${battlefields.length} 个监控战场完成刷新`, 'success');
-      await fetchYinliSignals(productId);
+      const refreshedSignals = await fetchYinliSignals(productId);
+      const strategySummary = await generateMissingYinliStrategies(refreshedSignals);
+      const finalSignals = strategySummary.requested > 0
+        ? await fetchYinliSignals(productId)
+        : refreshedSignals;
+
+      const selectedStillExists = selectedYinliSignal
+        ? finalSignals.find((signal) => signal.id === selectedYinliSignal.id)
+        : null;
+      if (selectedStillExists?.strategies?.[0]?.content) {
+        setReplyText(selectedStillExists.strategies[0].content);
+      }
+
+      const strategyText = strategySummary.requested > 0
+        ? `，已刷新 ${strategySummary.generated} 条回复锦囊`
+        : '，回复锦囊已同步';
+      showToast(`隐力信号已更新：${succeeded}/${battlefields.length} 个监控战场完成刷新${strategyText}`, 'success');
     } catch (err: any) {
       console.error(err);
       const message = err.message || '隐力信号更新失败';
@@ -2172,13 +2141,21 @@ export default function Sidebar() {
 
   // 6. 点击信号进行跳转与模板载入
   const handleSelectYinliSignal = (signal: YinliSignal) => {
+    const replyUrl = getYinliSignalReplyUrl(signal);
+    if (!replyUrl) {
+      setSelectedYinliSignal(signal);
+      setActiveTab('reply');
+      showToast('该隐力信号缺少可打开的原帖链接，请先在隐力端刷新该战场后重试', 'error');
+      return;
+    }
+
     setSelectedYinliSignal(signal);
     
     // 打开信号链接，若是活动页，在 activeTab 授权下运行
     if (typeof chrome !== 'undefined' && chrome.tabs) {
-      chrome.tabs.create({ url: signal.url });
+      chrome.tabs.create({ url: replyUrl });
     } else {
-      window.open(signal.url, '_blank');
+      window.open(replyUrl, '_blank');
     }
     
     // 如果该信号具有生成好的锦囊回复策略，默认将第一个锦囊填充到草稿回复中，并切到 reply tab
@@ -2297,6 +2274,11 @@ export default function Sidebar() {
         showToast('请先在“隐力信号”列表中选中目标信号', 'error');
         return;
       }
+      const replyUrl = getYinliSignalReplyUrl(selectedYinliSignal);
+      if (!replyUrl) {
+        showToast('该隐力信号缺少可打开的原帖链接，请先在隐力端刷新该战场后重试', 'error');
+        return;
+      }
       const source = selectedYinliSignal.source.toLowerCase();
       let platform: Platform = 'twitter';
       if (source.includes('youtube')) platform = 'youtube';
@@ -2310,7 +2292,7 @@ export default function Sidebar() {
         content: selectedYinliSignal.textContent,
         engagement: { likes: 0, comments: 0, shares: 0 },
         heatScore: 0,
-        pageUrl: selectedYinliSignal.url,
+        pageUrl: replyUrl,
         extractedAt: Date.now()
       };
       runBackgroundCommentTasks([mockPost]);
@@ -2861,6 +2843,11 @@ export default function Sidebar() {
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-violet-500/20 text-violet-300">
                                 {signal.source.toUpperCase()}
                               </span>
+                              {!getYinliSignalReplyUrl(signal) && (
+                                <span className="text-[10px] text-rose-300 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">
+                                  原帖链接异常
+                                </span>
+                              )}
                               {signal.battlefield?.name && (
                                 <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded truncate max-w-[100px]">
                                   <span className="inline-flex items-center gap-1">
@@ -3216,14 +3203,20 @@ export default function Sidebar() {
                       </div>
                       <div className="flex items-center justify-between text-[9px] text-slate-500 pt-0.5">
                         <span className="inline-flex items-center gap-1"><Icon icon={CircleCheck} className="w-3 h-3" />{selectedYinliSignal.author || '未知用户'}</span>
-                        <a 
-                          href={selectedYinliSignal.url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="text-indigo-400 hover:text-indigo-300 flex items-center gap-0.5 transition-colors"
-                        >
-                          打开原贴 ↗
-                        </a>
+                        {getYinliSignalReplyUrl(selectedYinliSignal) ? (
+                          <a 
+                            href={getYinliSignalReplyUrl(selectedYinliSignal) || '#'} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-indigo-400 hover:text-indigo-300 flex items-center gap-0.5 transition-colors"
+                          >
+                            打开原贴 ↗
+                          </a>
+                        ) : (
+                          <span className="text-rose-300 inline-flex items-center gap-0.5">
+                            原帖链接异常
+                          </span>
+                        )}
                       </div>
                     </div>
                   ) : (
