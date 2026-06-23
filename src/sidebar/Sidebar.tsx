@@ -174,6 +174,11 @@ const getMarketLink = (id: string, mode: 'openvsx' | 'chrome') => {
   }
 };
 
+const parsePluginOpportunitySeedKeywords = (value: string) => value
+  .split(/[\n,，]/)
+  .map(item => item.trim())
+  .filter(Boolean);
+
 export default function Sidebar() {
   // 视图 Tab 切换
   const [activeTab, setActiveTab] = useState<'search' | 'reply' | 'memos' | 'publish' | 'settings' | 'analysis'>('search');
@@ -189,6 +194,7 @@ export default function Sidebar() {
   const [analysisTotal, setAnalysisTotal] = useState(0);
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [pluginOpportunitySeedKeywords, setPluginOpportunitySeedKeywords] = useState('');
 
   const resetAnalysisResults = () => {
     setAnalysisResults(null);
@@ -539,7 +545,8 @@ export default function Sidebar() {
 
       let pluginKeywordOpportunityReport = null;
       try {
-        const opportunityKeywords = buildPluginOpportunityKeywords(kws, {
+        const seedKeywords = parsePluginOpportunitySeedKeywords(pluginOpportunitySeedKeywords);
+        const opportunityKeywords = buildPluginOpportunityKeywords([...kws, ...seedKeywords], {
           displayName,
           description: targetDescription
         });
@@ -1494,7 +1501,8 @@ export default function Sidebar() {
         'publishCTA',
         'publishExtraContext',
         'savedOpenVSXPlugins',
-        'savedChromePlugins'
+        'savedChromePlugins',
+        'pluginOpportunitySeedKeywords'
       ], (result) => {
         if (result.postActivity) {
           setPostActivity(result.postActivity as PostActivityMap);
@@ -1557,6 +1565,9 @@ export default function Sidebar() {
         }
         if (result.savedChromePlugins) {
           setSavedChromePlugins(result.savedChromePlugins);
+        }
+        if (result.pluginOpportunitySeedKeywords !== undefined) {
+          setPluginOpportunitySeedKeywords(String(result.pluginOpportunitySeedKeywords || ''));
         }
 
         if (result.keywords) {
@@ -3930,6 +3941,31 @@ export default function Sidebar() {
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* 插件市场机会词表 */}
+            <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold text-slate-300">插件市场机会词表</h3>
+                <span className="text-[9px] text-slate-500">
+                  {parsePluginOpportunitySeedKeywords(pluginOpportunitySeedKeywords).length} 个词
+                </span>
+              </div>
+              <textarea
+                value={pluginOpportunitySeedKeywords}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setPluginOpportunitySeedKeywords(value);
+                  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                    chrome.storage.local.set({ pluginOpportunitySeedKeywords: value });
+                  }
+                }}
+                placeholder={'按逗号或换行输入，例如：\npython type checker\nmarkdown preview\ngit graph'}
+                className="w-full min-h-[110px] px-3 py-2 bg-slate-950 border border-slate-850 rounded-lg text-xs leading-relaxed focus:outline-none focus:border-indigo-500 text-slate-100 placeholder-slate-600 resize-y"
+              />
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                这些词会与本次输入的监测词、插件名称和描述中抽取出的词一起参与 OpenVSX / VS Marketplace 机会扫描。
+              </p>
             </div>
             
             {/* 快捷访问已适配平台 */}

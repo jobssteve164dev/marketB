@@ -49,26 +49,6 @@ type NormalizedPluginItem = {
   rating: number;
 };
 
-const DEFAULT_GROWTH_KEYWORDS = [
-  'ai',
-  'agent',
-  'ai agent',
-  'coding agent',
-  'ai coding',
-  'ai coding agent',
-  'ai code agent',
-  'agent roadmap',
-  'ai roadmap',
-  'coding roadmap',
-  'project roadmap',
-  'claude code',
-  'codex',
-  'cursor agent',
-  'local ai agent',
-  'agent sessions',
-  'agent workflow'
-];
-
 const VSCODE_SORT_BY: Record<string, number> = {
   relevance: 0,
   timestamp: 1,
@@ -92,19 +72,45 @@ const uniqueTerms = (terms: string[]) => {
   return result;
 };
 
+const STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'can', 'for', 'from', 'in', 'into',
+  'is', 'it', 'its', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'with', 'you',
+  'your', 'plugin', 'plugins', 'extension', 'extensions', 'tool', 'tools', 'vscode',
+  'visual', 'studio', 'code', 'marketplace', 'open', 'vsx', 'free'
+]);
+
+const WEAK_WORDS = new Set([
+  'best', 'better', 'easy', 'fast', 'simple', 'powerful', 'modern', 'advanced',
+  'support', 'supports', 'using', 'based', 'make', 'helps', 'work', 'works'
+]);
+
+const extractContextKeywords = (context: { displayName?: string; description?: string }) => {
+  const text = `${context.displayName || ''} ${context.description || ''}`
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[^a-zA-Z0-9+#.\s-]/g, ' ')
+    .toLowerCase();
+  const words = text
+    .split(/\s+/)
+    .map(word => word.replace(/^-+|-+$/g, ''))
+    .filter(word => word.length > 1 && !STOP_WORDS.has(word) && !WEAK_WORDS.has(word));
+  const phrases: string[] = [];
+
+  for (let size = 3; size >= 1; size -= 1) {
+    for (let index = 0; index <= words.length - size; index += 1) {
+      const parts = words.slice(index, index + size);
+      if (parts.length > 1 && parts.every(part => part.length <= 2)) continue;
+      if (parts.every(part => WEAK_WORDS.has(part))) continue;
+      phrases.push(parts.join(' '));
+    }
+  }
+
+  return phrases.filter(term => term.length >= 3 && term.length <= 48).slice(0, 24);
+};
+
 export const buildPluginOpportunityKeywords = (
   monitoredKeywords: string[],
   context: { displayName?: string; description?: string } = {}
-) => {
-  const text = `${context.displayName || ''} ${context.description || ''}`.toLowerCase();
-  const contextualTerms: string[] = [];
-  if (text.includes('roadmap')) contextualTerms.push('ai roadmap', 'coding roadmap', 'project roadmap');
-  if (text.includes('agent')) contextualTerms.push('agent workflow', 'agent sessions', 'local ai agent');
-  if (text.includes('claude')) contextualTerms.push('claude code');
-  if (text.includes('codex')) contextualTerms.push('codex');
-  if (text.includes('cursor')) contextualTerms.push('cursor agent');
-  return uniqueTerms([...monitoredKeywords, ...contextualTerms, ...DEFAULT_GROWTH_KEYWORDS]).slice(0, 24);
-};
+) => uniqueTerms([...monitoredKeywords, ...extractContextKeywords(context)]).slice(0, 24);
 
 const toSlug = (value: string) => value
   .toLowerCase()
@@ -229,13 +235,8 @@ const scoreOpportunity = (keyword: string, openvsx: PluginKeywordMarketRank, vsc
   const ranks = [openvsx.rank, vscode.rank].filter(rank => rank > 0);
   const bestRank = ranks.length ? Math.min(...ranks) : 0;
   const demand = Math.log10(openvsx.topDownloads + vscode.topDownloads + openvsx.total + vscode.total + 10) * 18;
-  const relevanceBonus = [
-    'ai coding agent',
-    'coding agent',
-    'agent roadmap',
-    'ai agent',
-    'project roadmap'
-  ].some(term => keyword.toLowerCase().includes(term)) ? 16 : 8;
+  const termCount = keyword.split(/\s+/).filter(Boolean).length;
+  const relevanceBonus = termCount >= 2 ? 12 : 6;
   const rankSignal = bestRank === 0 ? 18 : bestRank <= 3 ? 70 : bestRank <= 10 ? 58 : bestRank <= 30 ? 45 : bestRank <= 100 ? 28 : 18;
   const competitionPenalty = Math.log10(Math.max(openvsx.topDownloads, vscode.topDownloads, 1)) * 3;
   const score = Math.max(0, Math.min(100, Math.round(rankSignal + demand + relevanceBonus - competitionPenalty)));
@@ -263,31 +264,30 @@ const createExperimentalListing = (
   opportunities: PluginKeywordOpportunity[],
   context: { displayName?: string; namespace?: string; description?: string }
 ): ExperimentalPluginListing | null => {
-  const primary = opportunities.find(item => item.keyword === 'ai coding agent')
-    || opportunities.find(item => item.keyword === 'coding agent')
-    || opportunities.find(item => item.keyword.includes('roadmap'))
+  const primary = opportunities.find(item => item.level === 'high' && item.bestRank > 3)
+    || opportunities.find(item => item.level === 'medium' && item.bestRank > 10)
     || opportunities[0];
   if (!primary) return null;
 
   const brand = context.displayName?.match(/[a-z0-9]+/i)?.[0] || context.namespace || 'plugin';
   const keywordSlug = toSlug(primary.keyword);
-  const needsRoadmap = /roadmap/i.test(`${context.displayName || ''} ${context.description || ''}`) && !keywordSlug.includes('roadmap');
-  const extensionId = toSlug(`${keywordSlug}${needsRoadmap ? '-roadmap' : ''}`) || 'ai-coding-agent';
+  const extensionId = keywordSlug || 'focused-extension';
   const titleKeyword = primary.keyword
     .split(/\s+/)
     .map(part => part === 'ai' ? 'AI' : part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
-  const displayName = needsRoadmap
-    ? `${titleKeyword} Roadmap - ${brand}`
-    : `${titleKeyword} - ${brand}`;
+  const cleanBrand = brand.replace(/[^a-z0-9]/gi, '') || 'Plugin';
+  const displayName = titleKeyword.toLowerCase().includes(cleanBrand.toLowerCase())
+    ? titleKeyword
+    : `${titleKeyword} - ${cleanBrand}`;
 
   return {
     keyword: primary.keyword,
-    namespaceHint: `${brand.replace(/[^a-z0-9]/gi, '') || 'Plugin'}AI`,
+    namespaceHint: cleanBrand,
     extensionId,
     displayName,
-    description: `${titleKeyword} cockpit for developers. Keep local agent sessions organized and turn scattered AI work into a Git-friendly project roadmap.`,
-    descriptionZh: '面向独立开发者的 AI 编程 Agent 工作台。统一管理本地 Agent 会话，把分散的 AI 对话沉淀为适合 Git 管理的项目路线图。'
+    description: `VS Code extension for ${primary.keyword}. Help developers complete this workflow faster with a focused, searchable plugin experience.`,
+    descriptionZh: `面向开发者的 ${primary.keyword} 插件。围绕这一高价值检索词提供清晰、聚焦、易搜索的工作流体验。`
   };
 };
 
