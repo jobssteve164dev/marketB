@@ -63,6 +63,10 @@ import {
   getYinliSignalReplyUrl,
   normalizeAifAccount
 } from './yinli-helpers.js';
+import {
+  analyzePluginKeywordOpportunities,
+  buildPluginOpportunityKeywords
+} from '../shared/pluginMarketAnalysis.js';
 
 const DEFAULT_YINLI_URL = (import.meta as any).env?.VITE_YINLI_API_URL || 
   ((import.meta as any).env?.DEV ? 'http://localhost:3000' : 'https://seevoid.com');
@@ -338,7 +342,7 @@ export default function Sidebar() {
         .map(k => k.trim())
         .filter(k => k.length > 0);
 
-      const totalSteps = 1 + kws.length + 1;
+      const totalSteps = 1 + kws.length + 2;
       setAnalysisTotal(totalSteps);
       setAnalysisProgress(1);
 
@@ -449,6 +453,7 @@ export default function Sidebar() {
       }
 
       const displayName = detail?.name || apiDetail?.displayName || name;
+      const targetDescription = detail?.description || apiDetail?.description || '';
       const targetDownloads = detail?.downloads || apiDetail?.downloadCount || 0;
       const targetRating = detail?.rating || apiDetail?.averageRating || 0;
       const targetReviewCount = detail?.reviewCount || apiDetail?.reviewCount || 0;
@@ -532,11 +537,47 @@ export default function Sidebar() {
         });
       }
 
+      let pluginKeywordOpportunityReport = null;
+      try {
+        const opportunityKeywords = buildPluginOpportunityKeywords(kws, {
+          displayName,
+          description: targetDescription
+        });
+        pluginKeywordOpportunityReport = await analyzePluginKeywordOpportunities({
+          targetId,
+          keywords: opportunityKeywords,
+          displayName,
+          namespace,
+          description: targetDescription,
+          scanLimit: 300,
+          pageSize: 50
+        });
+        const highOpportunities = pluginKeywordOpportunityReport.opportunities
+          .filter(item => item.level === 'high' && item.bestRank > 3)
+          .slice(0, 3);
+        if (highOpportunities.length > 0) {
+          optimizationActions.push({
+            type: 'info',
+            title: '可实验的新插件自然流量词',
+            content: `建议优先验证 [${highOpportunities.map(item => item.keyword).join(', ')}]。这些词在 OpenVSX/VS Marketplace 有需求信号，但当前插件还没有稳定占据前排。`
+          });
+        }
+      } catch (err) {
+        console.error('Plugin keyword opportunity analysis failed:', err);
+        optimizationActions.push({
+          type: 'warning',
+          title: '双市场关键词机会未完成',
+          content: '当前 OpenVSX 排名报告已完成，但 VS Marketplace/API 机会扫描失败。可稍后重试，用于补齐新插件命名和关键词实验判断。'
+        });
+      } finally {
+        setAnalysisProgress(prev => prev + 1);
+      }
+
       setAnalysisResults({
         mode: 'openvsx',
         query: targetId,
         displayName,
-        description: detail?.description || apiDetail?.description || '',
+        description: targetDescription,
         icon: detail?.icon || apiDetail?.files?.icon || '',
         downloads: targetDownloads,
         rating: targetRating,
@@ -550,6 +591,8 @@ export default function Sidebar() {
         categoryRank,
         categoryTotal,
         categoryTop5,
+        keywordOpportunities: pluginKeywordOpportunityReport?.opportunities || [],
+        experimentalListing: pluginKeywordOpportunityReport?.experimentalListing || null,
         actions: optimizationActions
       });
 
@@ -4426,6 +4469,80 @@ export default function Sidebar() {
                                 </div>
                               </div>
                             )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. 双市场关键词机会 */}
+                  {analysisResults.mode === 'openvsx' && analysisResults.keywordOpportunities && analysisResults.keywordOpportunities.length > 0 && (
+                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 space-y-3 shrink-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-xs font-bold text-slate-200 inline-flex items-center gap-1.5">
+                          <Icon icon={Flame} className="w-3.5 h-3.5" />
+                          双市场关键词机会
+                        </h3>
+                        <span className="text-[9px] text-slate-500">OpenVSX + VS Marketplace</span>
+                      </div>
+
+                      {analysisResults.experimentalListing && (
+                        <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold text-indigo-300">实验新插件建议</span>
+                            <span className="text-[9px] text-indigo-200 bg-indigo-500/10 border border-indigo-500/20 rounded px-1.5 py-0.5">
+                              #{analysisResults.experimentalListing.keyword}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 gap-1 text-[10px] text-slate-300">
+                            <span>Namespace 候选: <strong className="text-slate-100 font-mono">{analysisResults.experimentalListing.namespaceHint}</strong></span>
+                            <span>插件 ID: <strong className="text-slate-100 font-mono">{analysisResults.experimentalListing.extensionId}</strong></span>
+                            <span>显示名称: <strong className="text-slate-100">{analysisResults.experimentalListing.displayName}</strong></span>
+                          </div>
+                          <p className="text-[10px] leading-relaxed text-slate-400">{analysisResults.experimentalListing.description}</p>
+                          <p className="text-[10px] leading-relaxed text-slate-500">{analysisResults.experimentalListing.descriptionZh}</p>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        {analysisResults.keywordOpportunities.slice(0, 8).map((item: any) => (
+                          <div key={item.keyword} className="bg-slate-950/60 border border-slate-850 rounded-lg p-3 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-200 truncate">#{item.keyword}</div>
+                                <div className="text-[9px] text-slate-500">
+                                  机会分 {item.score}/100 · {item.level === 'high' ? '高优先级' : item.level === 'medium' ? '可跟进' : '仅监测'}
+                                </div>
+                              </div>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                item.level === 'high' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                item.level === 'medium' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                'bg-slate-800/60 text-slate-400 border-slate-700'
+                              }`}>
+                                {item.bestRank > 0 ? `最好第 ${item.bestRank}` : '未进前 300'}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[9px]">
+                              <div className="bg-slate-900/70 border border-slate-850 rounded p-2">
+                                <div className="font-bold text-slate-300">OpenVSX</div>
+                                <div className="text-slate-500 pt-0.5">
+                                  {item.openvsx.rank > 0 ? `第 ${item.openvsx.rank} 名` : `未进前 ${item.openvsx.scanned || 300}`}
+                                  <span className="pl-1">/ 共 {item.openvsx.total || '-'}</span>
+                                </div>
+                                <div className="text-indigo-300 pt-0.5">头部下载 {item.openvsx.topDownloads.toLocaleString()}</div>
+                              </div>
+                              <div className="bg-slate-900/70 border border-slate-850 rounded p-2">
+                                <div className="font-bold text-slate-300">VS Marketplace</div>
+                                <div className="text-slate-500 pt-0.5">
+                                  {item.vscode.rank > 0 ? `第 ${item.vscode.rank} 名` : `未进前 ${item.vscode.scanned || 300}`}
+                                  <span className="pl-1">/ 共 {item.vscode.total || '-'}</span>
+                                </div>
+                                <div className="text-indigo-300 pt-0.5">头部安装 {item.vscode.topDownloads.toLocaleString()}</div>
+                              </div>
+                            </div>
+
+                            <p className="text-[10px] leading-relaxed text-slate-400">{item.recommendation}</p>
                           </div>
                         ))}
                       </div>
